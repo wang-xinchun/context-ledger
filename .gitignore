@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Build and coverage
+dist/
+build/
+htmlcov/
+.coverage
+coverage.xml
+
+# Runtime data
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*.index
+data/*.bin
+data/*.jsonl
+data/*.parquet
+logs/*.log
+logs/*.jsonl
+
+# Node (future web UI)
+node_modules/
+.next/
+out/
+
+# IDE/OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+

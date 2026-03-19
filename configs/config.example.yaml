@@ -1,0 +1,62 @@
+app:
+  env: "dev"
+  log_level: "INFO"
+
+provider:
+  chat_provider: "lmstudio"
+  embedding_provider: "local"
+  provider_api_version: "1.0"
+
+chat:
+  base_url: "http://127.0.0.1:1234/v1"
+  model_name: "qwen32b"
+  timeout_ms: 60000
+  max_retries: 2
+
+budget:
+  max_context_tokens: 4096
+  min_output_reserve: 900
+  system_tokens: 400
+  snapshot_tokens: 700
+  recent_turn_tokens: 900
+  retrieved_tokens: 1200
+  user_tokens: 300
+
+retrieval:
+  quality_gate_enabled: true
+  min_quality_score: 0.65
+  enable_query_rewrite: true
+  max_retrieval_items: 12
+
+packing:
+  strategy: "position_aware"
+  edge_priority_ratio: 0.6
+
+balance:
+  mode: "balanced"
+  target_quality_score: 0.78
+  target_context_growth_ratio: 0.72
+  mode_switch_window: 3
+  hard_growth_cap_ratio: 0.85
+
+continuation:
+  enabled: true
+  max_rounds: 3
+  trigger_on_truncation: true
+
+quality_guard:
+  enabled: true
+  min_quality_score: 0.75
+  max_fix_rounds: 2
+
+safety:
+  project_root: "./"
+  path_allowlist_enabled: true
+  block_outside_root_delete: true
+
+storage:
+  sql_backend: "sqlite"
+  sql_dsn: "sqlite:///./data/memory.db"
+  vector_backend: "faiss"
+  vector_path: "./data/vector.index"
+
