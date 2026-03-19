@@ -15,10 +15,10 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: `M1 scaffold hardened and validated on Python 3.12 runtime (10/10 tests passing)`
+- Code status: `M1 chat core performance-tuned (single-pass profile reuse + lower repeated scans), validated on Python 3.12 runtime`
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
-- Overall completion: `54%`
+- Overall completion: `58%`
 
 ## Milestone Status
 | Milestone | Status | Notes |

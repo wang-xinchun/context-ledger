@@ -3,7 +3,7 @@
 ## 1. Project Status
 - Last updated: `2026-03-20`
 - Current phase: `M1 Implementation (In Progress)`
-- Overall completion: `54%`
+- Overall completion: `58%`
 
 ## 2. Milestone Board
 | Milestone | Description | Owner | Status | Target Date | Notes |
@@ -22,6 +22,9 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 ## 3. Session Log
 | Date | What changed | Risk/Blocker | Next step |
 |---|---|---|---|
+| 2026-03-20 | Completed performance-oriented refactor on chat service: consolidated text feature extraction into single-pass `MessageProfile`, enabled profile reuse in budget calculation to remove duplicate scans, and added regression test for reused profile path (`13 passed`). | Current scoring is still heuristic; true performance/quality behavior should be calibrated with live provider telemetry. | Keep current architecture and start provider integration to collect real runtime metrics for coefficient tuning. |
+| 2026-03-20 | Refactored M1 chat algorithm for maintainability and performance: consolidated repeated text scans into a single `MessageProfile` extraction pass, modularized budget/scoring strategy functions, and refreshed Chinese inline comments for key non-obvious logic. | Heuristic behavior remains deterministic and test-covered, but coefficient tuning still depends on real provider telemetry in later stages. | Keep current strategy architecture and calibrate heuristic coefficients during provider adapter integration. |
+| 2026-03-20 | Upgraded M1 chat internals with dynamic budget algorithm (complexity-aware token estimation + adaptive output reserve), computed `quality/retrieval/context_growth/balance/fallback` metadata via heuristics, and added expanded unit/integration assertions (`12 passed`). | Heuristic scores are deterministic and test-covered, but still placeholder-grade until real provider/tokenizer telemetry is integrated. | Keep this algorithm as M1 baseline and calibrate coefficients with real runtime metrics during provider integration stage. |
 | 2026-03-20 | Successfully installed Python 3.12 after source refresh, created `.venv312`, installed dependencies, and reran full suite (`10 passed`) on compliant runtime. | No current test-execution blocker in local environment. | Continue M1 implementation with `/v1/resume` minimal path and memory write placeholder. |
 | 2026-03-19 | Hardened current M1 slice: replaced per-file global clients with shared `TestClient` fixture, added budget unit tests, and completed clean regression run (`10 passed`, no warnings). | Python 3.12 runtime installation still blocked by network source errors (`winget`/`0x80072efd`), so current validation remains on Python 3.10 fallback environment. | Retry Python 3.12 installation and rerun full suite on compliant runtime, then continue `/v1/resume` implementation. |
 | 2026-03-19 | Provisioned local `.venv`, installed runtime/dev dependencies, and executed test suite successfully (`7 passed`). | Python 3.12 installation remains blocked by network source errors (`winget`/`0x80072efd`), so tests were validated on Python 3.10 fallback environment. | Retry Python 3.12 installation when network source is reachable, then re-run full test suite on compliant runtime. |

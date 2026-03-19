@@ -330,3 +330,57 @@ This file is the cross-session operation log for collaboration and handover.
   2. Keep running regression checks in `.venv312`.
 - Blockers:
   - None
+
+## [2026-03-20 00:15] Session Note
+- Operator: Codex
+- Summary: Optimized existing M1 chat algorithms by introducing complexity-aware token estimation, adaptive output reserve, and heuristic-driven metadata scoring for quality/balance/fallback signals.
+- Files changed:
+  - app/api/v1/service.py
+  - tests/integration/test_v1_chat.py
+  - tests/unit/test_budget_service.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep algorithm deterministic and pure-function-based to simplify regression testing before provider telemetry integration.
+  - Add moderate Chinese inline comments only around non-obvious algorithm blocks.
+- Next actions:
+  1. Calibrate heuristic coefficients with real provider/tokenizer observations in subsequent M1 steps.
+  2. Preserve current regression suite as baseline guard (`12 passed` on Python 3.12).
+- Blockers:
+  - None
+
+## [2026-03-20 00:21] Session Note
+- Operator: Codex
+- Summary: Refactored algorithm implementation for maintainability and lower runtime overhead by replacing repeated text scans with one reusable message profiling pass and clearer strategy boundaries.
+- Files changed:
+  - app/api/v1/service.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Centralize message-derived signals in `MessageProfile` to reduce duplicated computation and simplify future coefficient tuning.
+  - Keep compatibility wrapper functions (`_estimate_input_tokens`, `_message_complexity_ratio`) for test stability and incremental migration.
+- Next actions:
+  1. Use the refactored strategy layout as the base for provider telemetry integration.
+  2. Add benchmark-style regression checks if performance-sensitive workloads increase.
+- Blockers:
+  - None
+
+## [2026-03-20 00:32] Session Note
+- Operator: Codex
+- Summary: Applied additional performance tuning by introducing profile reuse path in budget calculation and reducing repeated message-derived computations, then validated with expanded regression tests.
+- Files changed:
+  - app/api/v1/service.py
+  - tests/unit/test_budget_service.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep `_build_budget(..., profile=...)` optional parameter for backward-compatible tests while enabling lower-overhead internal path.
+  - Maintain deterministic strategy logic and avoid premature async/multi-thread complexity until real IO hotspots emerge.
+- Next actions:
+  1. Introduce runtime metrics collection around profile/build-budget latency once provider calls are wired.
+  2. Tune heuristic coefficients with observed production-like traces.
+- Blockers:
+  - None
