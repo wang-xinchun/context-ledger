@@ -23,5 +23,6 @@
 ## Engineering
 - [Deployment Guide v1](./Deployment-Guide-v1.md)
 - [Development Guide v1](./Development-Guide-v1.md)
+- [Operational Workflow v1](./Operational-Workflow-v1.md)
 - [Test Plan v1](./Test-Plan-v1.md)
 - [Handover Guide v1](./Handover-Guide-v1.md)

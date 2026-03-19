@@ -212,3 +212,121 @@ This file is the cross-session operation log for collaboration and handover.
   2. Push current documentation baseline.
 - Blockers:
   - None
+
+## [2026-03-19 22:26] Session Note
+- Operator: Codex
+- Summary: Consolidated operational conventions into a single workflow document and linked it from repository indexes for daily execution consistency.
+- Files changed:
+  - docs/Operational-Workflow-v1.md
+  - README.md
+  - docs/README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Use `docs/Operational-Workflow-v1.md` as the primary day-to-day execution checklist.
+  - Keep `README.md`, `docs/Progress-Tracker.md`, and `MESSAGES.md` synchronized at every session close.
+- Next actions:
+  1. Start M1 runnable scaffold under `app/`.
+  2. Implement `/v1/health` and add corresponding tests.
+- Blockers:
+  - None
+
+## [2026-03-19 23:09] Session Note
+- Operator: Codex
+- Summary: Started M1 implementation by adding runnable FastAPI scaffold, `/v1/health`, minimal `/v1/chat` with reserved telemetry metadata, OpenAI-compatible skeleton endpoints, and initial API tests.
+- Files changed:
+  - app/main.py
+  - app/core/settings.py
+  - app/api/__init__.py
+  - app/api/v1/__init__.py
+  - app/api/v1/schemas.py
+  - app/api/v1/service.py
+  - app/api/v1/router.py
+  - app/compatibility/__init__.py
+  - app/compatibility/openai_router.py
+  - tests/integration/test_v1_health.py
+  - tests/integration/test_v1_chat.py
+  - tests/compatibility/test_openai_gateway_skeleton.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep compatibility endpoints as explicit `501 NOT_IMPLEMENTED` skeletons for current M1 stage.
+  - Reserve telemetry fields in chat response shape now to reduce refactor cost in M2/U1.
+- Next actions:
+  1. Install dev dependencies and run `pytest`.
+  2. Implement `/v1/resume` and memory write placeholder path.
+  3. Start SQLAlchemy + Alembic baseline integration.
+- Blockers:
+  - Python environment missing `pytest`, so automated tests were not executable in this session.
+
+## [2026-03-19 23:27] Session Note
+- Operator: Codex
+- Summary: Applied immediate code review fixes for compatibility error contract and chat budget consistency, then expanded compatibility and budget regression tests.
+- Files changed:
+  - app/compatibility/openai_router.py
+  - app/api/v1/service.py
+  - tests/compatibility/test_openai_gateway_skeleton.py
+  - tests/integration/test_v1_chat.py
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Return OpenAI-compatible skeleton errors as top-level `error` payload with `request_id` instead of nested FastAPI `detail`.
+  - Enforce budget invariant in scaffold stage: `used_input_tokens + reserved_output_tokens <= max_context_tokens`.
+- Next actions:
+  1. Set up Python 3.12 + dependencies (`fastapi`, `pytest`) and run tests.
+  2. Continue M1 with `/v1/resume` and memory write placeholder.
+- Blockers:
+  - Runtime/API tests still cannot execute in current environment until required dependencies are installed.
+
+## [2026-03-19 23:36] Session Note
+- Operator: Codex
+- Summary: Unblocked local test execution by creating `.venv`, installing runtime/dev dependencies, and running full test suite successfully.
+- Files changed:
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Use local Python 3.10 `.venv` as temporary fallback for fast verification while Python 3.12 installation is unavailable.
+  - Keep README control panel synchronized with Progress Tracker after test unblock.
+- Next actions:
+  1. Retry Python 3.12 installation and migrate venv to compliant runtime.
+  2. Re-run tests on Python 3.12 and continue implementing `/v1/resume`.
+- Blockers:
+  - `winget` source/network errors (`0x80072efd`) currently block installing Python 3.12.
+
+## [2026-03-19 23:43] Session Note
+- Operator: Codex
+- Summary: Hardened the implemented M1 scope by improving test reliability and adding budget-focused unit coverage; regression suite now runs cleanly.
+- Files changed:
+  - tests/conftest.py
+  - tests/integration/test_v1_health.py
+  - tests/integration/test_v1_chat.py
+  - tests/compatibility/test_openai_gateway_skeleton.py
+  - tests/unit/test_budget_service.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Use shared `TestClient` fixture to avoid test lifecycle leakage and flaky warning behavior.
+  - Keep budget invariants protected with dedicated unit tests, not only integration assertions.
+- Next actions:
+  1. Retry Python 3.12 installation and rerun suite in compliant runtime.
+  2. Continue `/v1/resume` implementation after runtime compliance check.
+- Blockers:
+  - Python 3.12 installation still blocked by `winget` network/source errors.
+
+## [2026-03-20 00:03] Session Note
+- Operator: Codex
+- Summary: Retried environment provisioning successfully, installed Python 3.12, created `.venv312`, and validated the project test suite on compliant runtime.
+- Files changed:
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Use `.venv312` as the default validation environment for this project going forward.
+- Next actions:
+  1. Continue M1 implementation with `/v1/resume` minimal path and memory write placeholder.
+  2. Keep running regression checks in `.venv312`.
+- Blockers:
+  - None

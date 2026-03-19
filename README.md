@@ -13,17 +13,17 @@ ContextLedger solves this with a middle layer:
 `UI -> ContextLedger -> LLM -> ContextLedger -> UI`
 
 ## Project Control Panel
-- Last updated: `2026-03-19`
-- Stage: `Planning / Documentation`
-- Code status: `Not implemented yet`
+- Last updated: `2026-03-20`
+- Stage: `M1 Implementation (In Progress)`
+- Code status: `M1 scaffold hardened and validated on Python 3.12 runtime (10/10 tests passing)`
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
-- Overall completion: `38%`
+- Overall completion: `54%`
 
 ## Milestone Status
 | Milestone | Status | Notes |
 |---|---|---|
-| M1 Chat minimal loop | Not Started | Build scaffold + `/v1/health` + `/v1/chat` basic |
+| M1 Chat minimal loop | In Progress | Scaffold and `/v1/health` + minimal `/v1/chat` are implemented; continue with `/v1/resume` + memory write |
 | M2 Context budget engine | Not Started | Add overflow degrade and output reserve |
 | M3 Response stability | Not Started | Two-phase generation + auto continuation |
 | M4 Timeline + regression | Not Started | Timeline endpoint and quality baseline |
@@ -38,6 +38,7 @@ ContextLedger solves this with a middle layer:
 - [Tech Upgrade v2](./docs/Tech-Upgrade-v2.md)
 - [Compatibility Strategy v1](./docs/Compatibility-Strategy-v1.md)
 - [File Management Plan v1](./docs/File-Management-Plan-v1.md)
+- [Operational Workflow v1](./docs/Operational-Workflow-v1.md)
 - [Product Requirements v1](./docs/PRD-v1.md)
 - [Architecture v1](./docs/Architecture-v1.md)
 - [API Spec v1](./docs/API-Spec-v1.md)
@@ -61,12 +62,11 @@ ContextLedger solves this with a middle layer:
 4. Before transfer, verify [Handover Guide](./docs/Handover-Guide-v1.md) checklist.
 
 ## Immediate Next Action
-1. Scaffold backend project (`FastAPI + SQLAlchemy + Alembic`).
-2. Implement `/v1/health`.
-3. Implement minimal `/v1/chat` request path with U1 telemetry fields reserved.
-4. Implement `Balance Controller` (`quality_score` vs `context_growth_ratio`) with mode switching.
-5. Add OpenAI-compatible gateway endpoints and compatibility conformance tests.
-6. Keep all new files aligned with `docs/File-Management-Plan-v1.md`.
+1. Implement `/v1/resume` minimal path and memory write placeholder.
+2. Add SQLAlchemy + Alembic scaffold and initial migration baseline.
+3. Replace placeholder chat response with provider adapter call path.
+4. Expand OpenAI-compatible endpoints from `501` skeleton to contract-compliant responses.
+5. Keep all new files aligned with `docs/File-Management-Plan-v1.md`.
 
 ## License
 TBD
