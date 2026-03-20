@@ -84,3 +84,21 @@ def test_build_timeline_cursor_and_limit(tmp_path) -> None:
     assert len(page_2["items"]) == 1
     assert page_2["items"][0]["type"] == "decision"
     assert page_2["next_cursor"] is None
+
+
+def test_build_timeline_skips_fact_events_for_space_efficiency(tmp_path) -> None:
+    ledger = MemoryLedger(tmp_path / "memory.jsonl")
+    project_id = "proj_timeline_fact"
+
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id="sess_1",
+        request_id="req_1",
+        user_message="team sync completed and artifacts were archived successfully",
+        assistant_answer="ok",
+        used_input_tokens=1,
+    )
+
+    page = ledger.build_timeline(project_id, limit=10)
+    assert page["items"] == []
+    assert page["next_cursor"] is None

@@ -15,7 +15,7 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: `M1 health/chat/resume/timeline minimal path is runnable; chat/memory algorithms optimized and validated on Python 3.12 runtime`
+- Code status: `M1 health/chat/resume/timeline minimal path is runnable; timeline cursor pagination algorithm and memory footprint were further optimized, validated on Python 3.12 runtime`
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
 - Overall completion: `72%`

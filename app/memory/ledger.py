@@ -36,11 +36,12 @@ TYPE_SCORE = {
     "constraint": 0.82,
     "fact": 0.75,
 }
-TIMELINE_MEMORY_TYPES = frozenset(TYPE_SCORE.keys())
+TIMELINE_MEMORY_TYPES = frozenset({"decision", "risk", "todo"})
 
 
 @dataclass(frozen=True, slots=True)
 class TimelineEvent:
+    seq: int
     id: str
     type: str
     content: str
@@ -56,9 +57,9 @@ class ProjectState:
     decisions: deque[str] = field(default_factory=lambda: deque(maxlen=MAX_DECISIONS_PER_PROJECT))
     todos: deque[str] = field(default_factory=lambda: deque(maxlen=MAX_TODOS_PER_PROJECT))
     todo_set: set[str] = field(default_factory=set)
-    timeline_events: deque[TimelineEvent] = field(
-        default_factory=lambda: deque(maxlen=MAX_TIMELINE_EVENTS_PER_PROJECT)
-    )
+    timeline_events: deque[TimelineEvent] = field(default_factory=deque)
+    timeline_id_to_seq: dict[str, int] = field(default_factory=dict)
+    timeline_next_seq: int = 0
 
 
 def _now_iso() -> str:
@@ -195,6 +196,33 @@ class MemoryLedger:
         state.todos.append(content)
         state.todo_set.add(key)
 
+    def _append_timeline_event(
+        self,
+        state: ProjectState,
+        *,
+        event_id: str,
+        memory_type: str,
+        content: str,
+        timestamp: str,
+    ) -> None:
+        # 手动维护窗口和索引映射，确保分页定位为 O(1)。
+        if len(state.timeline_events) == MAX_TIMELINE_EVENTS_PER_PROJECT:
+            evicted = state.timeline_events.popleft()
+            state.timeline_id_to_seq.pop(evicted.id, None)
+
+        seq = state.timeline_next_seq
+        state.timeline_next_seq = seq + 1
+        state.timeline_events.append(
+            TimelineEvent(
+                seq=seq,
+                id=event_id,
+                type=memory_type,
+                content=content,
+                timestamp=timestamp,
+            )
+        )
+        state.timeline_id_to_seq[event_id] = seq
+
     def _apply_record(self, record: dict[str, object]) -> None:
         kind = record.get("kind")
         project_id = str(record.get("project_id", ""))
@@ -228,13 +256,12 @@ class MemoryLedger:
             if not event_id:
                 event_id = f"evt_{uuid4().hex[:12]}"
             timestamp = str(record.get("created_at", "")).strip() or _now_iso()
-            state.timeline_events.append(
-                TimelineEvent(
-                    id=event_id,
-                    type=memory_type,
-                    content=content,
-                    timestamp=timestamp,
-                )
+            self._append_timeline_event(
+                state,
+                event_id=event_id,
+                memory_type=memory_type,
+                content=content,
+                timestamp=timestamp,
             )
 
     def record_chat_turn(
@@ -339,27 +366,37 @@ class MemoryLedger:
                 return {"items": [], "next_cursor": None}
 
             events = state.timeline_events
-            start_idx = len(events) - 1
+            oldest_seq = events[0].seq
+            newest_seq = events[-1].seq
 
-            # cursor 指向上一页最后一个事件，下一页从它之前的更旧事件继续。
+            end_seq_exclusive = state.timeline_next_seq
             if cursor:
-                matched = False
-                for idx in range(len(events) - 1, -1, -1):
-                    if events[idx].id == cursor:
-                        start_idx = idx - 1
-                        matched = True
-                        break
-                if not matched:
-                    start_idx = len(events) - 1
+                cursor_seq = state.timeline_id_to_seq.get(cursor)
+                if cursor_seq is not None:
+                    end_seq_exclusive = cursor_seq
 
-            if start_idx < 0:
+            start_seq = min(end_seq_exclusive - 1, newest_seq)
+            if start_seq < oldest_seq:
                 return {"items": [], "next_cursor": None}
 
+            # 基于 seq 计算偏移，只做一次反向切片，避免“先找游标再二次遍历”。
+            offset_from_newest = newest_seq - start_seq
+            selected = list(
+                islice(
+                    reversed(events),
+                    offset_from_newest,
+                    offset_from_newest + safe_limit + 1,
+                )
+            )
+            has_more = len(selected) > safe_limit
+            if has_more:
+                selected.pop()
+
             items: list[dict[str, str]] = []
-            idx = start_idx
-            while idx >= 0 and len(items) < safe_limit:
-                event = events[idx]
-                items.append(
+            append_item = items.append
+            for event in selected:
+                # 仅在返回阶段投影为 dict，减少中间层对象复制。
+                append_item(
                     {
                         "id": event.id,
                         "type": event.type,
@@ -367,9 +404,8 @@ class MemoryLedger:
                         "timestamp": event.timestamp,
                     }
                 )
-                idx -= 1
 
-            next_cursor = items[-1]["id"] if idx >= 0 and items else None
+            next_cursor = items[-1]["id"] if has_more and items else None
             return {"items": items, "next_cursor": next_cursor}
 
 

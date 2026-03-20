@@ -467,3 +467,22 @@ This file is the cross-session operation log for collaboration and handover.
   2. Add benchmark checks for timeline/resume path and message profile hot path.
 - Blockers:
   - None
+
+## [2026-03-20 08:48] Session Note
+- Operator: Codex
+- Summary: Performed algorithm-level optimization for the new timeline module: reduced stored event classes to `decision/risk/todo`, introduced sequence-index cursor mapping, and replaced two-stage cursor scanning with one-pass reverse slicing pagination to improve both latency and memory usage.
+- Files changed:
+  - app/memory/ledger.py
+  - app/api/v1/service.py
+  - tests/unit/test_memory_ledger.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep timeline as high-signal stream only (`decision/risk/todo`) to reduce storage churn and pagination payload noise.
+  - Keep cursor fallback behavior unchanged: unknown cursor still serves latest page to preserve current API tolerance.
+- Next actions:
+  1. Introduce DB-backed timeline/events model with SQLAlchemy + Alembic while maintaining existing cursor semantics.
+  2. Add micro-benchmark script to track pagination and profile extraction hot-path performance over iterations.
+- Blockers:
+  - None

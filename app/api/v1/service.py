@@ -431,17 +431,16 @@ def build_timeline_response(payload: TimelineRequest) -> TimelineResponse:
         limit=payload.limit,
         cursor=payload.cursor,
     )
+    raw_items = timeline["items"]
     return TimelineResponse(
         items=[
             TimelineItem(
-                id=str(item.get("id", "")),
-                type=str(item.get("type", "fact")),
-                content=str(item.get("content", "")),
-                timestamp=str(item.get("timestamp", "")),
+                id=item["id"],
+                type=item["type"],
+                content=item["content"],
+                timestamp=item["timestamp"],
             )
-            for item in timeline.get("items", [])
+            for item in raw_items
         ],
-        next_cursor=(
-            str(timeline["next_cursor"]) if timeline.get("next_cursor") is not None else None
-        ),
+        next_cursor=timeline["next_cursor"],
     )
