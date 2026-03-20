@@ -15,15 +15,15 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: `M1 chat core performance-tuned (single-pass profile reuse + lower repeated scans), validated on Python 3.12 runtime`
+- Code status: `M1 health/chat/resume path is runnable; memory ledger algorithms optimized (stream sentence parsing + single-pass classification + deque/set consistency fix), validated on Python 3.12 runtime`
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
-- Overall completion: `58%`
+- Overall completion: `66%`
 
 ## Milestone Status
 | Milestone | Status | Notes |
 |---|---|---|
-| M1 Chat minimal loop | In Progress | Scaffold and `/v1/health` + minimal `/v1/chat` are implemented; continue with `/v1/resume` + memory write |
+| M1 Chat minimal loop | In Progress | `/v1/health` + `/v1/chat` + `/v1/resume` and memory-write placeholder are implemented; performance tuning completed for memory ledger; continue with `/v1/timeline` + DB migration baseline |
 | M2 Context budget engine | Not Started | Add overflow degrade and output reserve |
 | M3 Response stability | Not Started | Two-phase generation + auto continuation |
 | M4 Timeline + regression | Not Started | Timeline endpoint and quality baseline |
@@ -62,8 +62,8 @@ ContextLedger solves this with a middle layer:
 4. Before transfer, verify [Handover Guide](./docs/Handover-Guide-v1.md) checklist.
 
 ## Immediate Next Action
-1. Implement `/v1/resume` minimal path and memory write placeholder.
-2. Add SQLAlchemy + Alembic scaffold and initial migration baseline.
+1. Implement `/v1/timeline` minimal path on top of current memory ledger output.
+2. Add SQLAlchemy + Alembic scaffold and initial migration baseline (replace JSONL placeholder progressively).
 3. Replace placeholder chat response with provider adapter call path.
 4. Expand OpenAI-compatible endpoints from `501` skeleton to contract-compliant responses.
 5. Keep all new files aligned with `docs/File-Management-Plan-v1.md`.

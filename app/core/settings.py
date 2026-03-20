@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 
 APP_NAME = "ContextLedger"
@@ -12,4 +13,8 @@ DEFAULT_EMBEDDING_PROVIDER = os.getenv("CONTEXTLEDGER_EMBEDDING_PROVIDER", "loca
 DEFAULT_MAX_CONTEXT_TOKENS = int(os.getenv("CONTEXTLEDGER_MAX_CONTEXT_TOKENS", "4096"))
 DEFAULT_RESERVED_OUTPUT_TOKENS = int(
     os.getenv("CONTEXTLEDGER_RESERVED_OUTPUT_TOKENS", "900")
+)
+MEMORY_LEDGER_PATH = os.getenv(
+    "CONTEXTLEDGER_MEMORY_LEDGER_PATH",
+    str(Path("data") / "contextledger-memory.jsonl"),
 )

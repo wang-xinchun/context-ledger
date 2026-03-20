@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import math
-import re
 from uuid import uuid4
 
 from app.api.v1.schemas import (
@@ -14,11 +14,14 @@ from app.api.v1.schemas import (
     ChatResponse,
     HealthResponse,
     ProviderInfo,
+    ResumeRequest,
+    ResumeResponse,
+    UsedMemory,
 )
 from app.core import settings
+from app.memory import ledger
 
 
-TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]+")
 PUNCTUATION_SYMBOLS = frozenset({",", ".", ";", ":", "?", "!", "，", "。", "？", "！"})
 CODE_KEYWORDS = frozenset(
     {
@@ -33,6 +36,11 @@ CODE_KEYWORDS = frozenset(
         "exception",
     }
 )
+TOKEN_KIND_NONE = 0
+TOKEN_KIND_ASCII = 1
+TOKEN_KIND_CJK = 2
+PROFILE_CACHE_CHAR_LIMIT = 4096
+PROFILE_CACHE_SIZE = 512
 ANCHOR_KEYWORDS = frozenset(
     {
         "project",
@@ -79,8 +87,7 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(value, high))
 
 
-def _is_cjk_char(char: str) -> bool:
-    code = ord(char)
+def _is_cjk_code(code: int) -> bool:
     return (
         0x4E00 <= code <= 0x9FFF
         or 0x3400 <= code <= 0x4DBF
@@ -89,7 +96,15 @@ def _is_cjk_char(char: str) -> bool:
     )
 
 
-def _build_message_profile(text: str) -> MessageProfile:
+def _token_char_kind(code: int) -> int:
+    if code == 95 or 48 <= code <= 57 or 65 <= code <= 90 or 97 <= code <= 122:
+        return TOKEN_KIND_ASCII
+    if _is_cjk_code(code):
+        return TOKEN_KIND_CJK
+    return TOKEN_KIND_NONE
+
+
+def _compute_message_profile(text: str) -> MessageProfile:
     """
     单次提取文本特征，供预算和评分共用。
     将原先多处重复扫描收敛为集中计算，降低运行时常数开销。
@@ -114,7 +129,29 @@ def _build_message_profile(text: str) -> MessageProfile:
     punctuation_hits = 0
     backtick_count = 0
 
-    for char in text:
+    token_count = 0
+    latin_token_count = 0
+    code_keyword_hits = 0
+    anchor_hits = 0
+    unique_tokens: set[str] = set()
+    current_token_kind = TOKEN_KIND_NONE
+    token_start = -1
+
+    def _consume_token(start: int, end: int, token_kind: int) -> None:
+        nonlocal token_count, latin_token_count, code_keyword_hits, anchor_hits
+        normalized = text[start:end].lower()
+        token_count += 1
+        unique_tokens.add(normalized)
+
+        if normalized in ANCHOR_KEYWORDS:
+            anchor_hits += 1
+        if token_kind == TOKEN_KIND_ASCII:
+            latin_token_count += 1
+            if normalized in CODE_KEYWORDS:
+                code_keyword_hits += 1
+
+    # 单次线性扫描：同时完成字符统计 + token 切分，减少正则二次扫描开销。
+    for index, char in enumerate(text):
         if char == "\n":
             line_breaks += 1
         if char in PUNCTUATION_SYMBOLS:
@@ -123,27 +160,24 @@ def _build_message_profile(text: str) -> MessageProfile:
             backtick_count += 1
         if not char.isspace():
             non_space_chars += 1
-        if _is_cjk_char(char):
+
+        code = ord(char)
+        token_kind = _token_char_kind(code)
+        if token_kind == TOKEN_KIND_CJK:
             cjk_chars += 1
 
-    token_count = 0
-    latin_token_count = 0
-    code_keyword_hits = 0
-    anchor_hits = 0
-    unique_tokens: set[str] = set()
-    for match in TOKEN_RE.finditer(text):
-        token = match.group(0)
-        normalized = token.lower()
+        if token_kind == current_token_kind and token_kind != TOKEN_KIND_NONE:
+            continue
 
-        token_count += 1
-        unique_tokens.add(normalized)
+        if current_token_kind != TOKEN_KIND_NONE and token_start >= 0:
+            _consume_token(token_start, index, current_token_kind)
 
-        if normalized in ANCHOR_KEYWORDS:
-            anchor_hits += 1
-        if token.isascii():
-            latin_token_count += 1
-            if normalized in CODE_KEYWORDS:
-                code_keyword_hits += 1
+        if token_kind != TOKEN_KIND_NONE:
+            token_start = index
+        current_token_kind = token_kind
+
+    if current_token_kind != TOKEN_KIND_NONE and token_start >= 0:
+        _consume_token(token_start, len(text), current_token_kind)
 
     code_hint_hits = min(code_keyword_hits, 8) + (2 if backtick_count >= 3 else 1 if backtick_count > 0 else 0)
 
@@ -173,6 +207,18 @@ def _build_message_profile(text: str) -> MessageProfile:
         complexity_ratio=complexity_ratio,
         estimated_input_tokens=estimated_input_tokens,
     )
+
+
+@lru_cache(maxsize=PROFILE_CACHE_SIZE)
+def _build_message_profile_cached(text: str) -> MessageProfile:
+    return _compute_message_profile(text)
+
+
+def _build_message_profile(text: str) -> MessageProfile:
+    # 高频短消息走缓存，避免在预算、评分、多次重试中重复计算。
+    if len(text) <= PROFILE_CACHE_CHAR_LIMIT:
+        return _build_message_profile_cached(text)
+    return _compute_message_profile(text)
 
 
 def _message_complexity_ratio(text: str) -> float:
@@ -337,6 +383,20 @@ def build_chat_response(payload: ChatRequest) -> ChatResponse:
     )
 
     answer = f"[contextledger:m1] message received: {payload.message}"
+    used_memories: list[UsedMemory] = []
+    try:
+        # memory 写入异常不应阻断主聊天路径，先降级返回结果。
+        used_memories = ledger.record_chat_turn(
+            project_id=payload.project_id,
+            session_id=payload.session_id,
+            request_id=request_id,
+            user_message=payload.message,
+            assistant_answer=answer,
+            used_input_tokens=budget.used_input_tokens,
+        )
+    except Exception:
+        used_memories = []
+
     return ChatResponse(
         answer=answer,
         meta=ChatMeta(
@@ -349,4 +409,14 @@ def build_chat_response(payload: ChatRequest) -> ChatResponse:
             fallback_mode=fallback_mode,
             budget=budget,
         ),
+        used_memories=used_memories,
+    )
+
+
+def build_resume_response(payload: ResumeRequest) -> ResumeResponse:
+    snapshot = ledger.build_resume(payload.project_id)
+    return ResumeResponse(
+        project_snapshot=str(snapshot.get("project_snapshot", "")),
+        recent_decisions=[str(item) for item in snapshot.get("recent_decisions", [])],
+        open_todos=[str(item) for item in snapshot.get("open_todos", [])],
     )

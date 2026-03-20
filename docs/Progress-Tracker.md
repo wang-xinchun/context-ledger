@@ -3,12 +3,12 @@
 ## 1. Project Status
 - Last updated: `2026-03-20`
 - Current phase: `M1 Implementation (In Progress)`
-- Overall completion: `58%`
+- Overall completion: `66%`
 
 ## 2. Milestone Board
 | Milestone | Description | Owner | Status | Target Date | Notes |
 |---|---|---|---|---|---|
-| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | Scaffold + `/v1/health` + minimal `/v1/chat` completed |
+| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | `/v1/health` + `/v1/chat` + `/v1/resume` with memory-write placeholder implemented |
 | M2 | Context compiler + budget degrade | TBD | Not Started | TBD | |
 | M3 | Two-phase generation + continuation + quality guard | TBD | Not Started | TBD | |
 | M4 | Timeline + regression + docs freeze | TBD | Not Started | TBD | |
@@ -22,6 +22,9 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 ## 3. Session Log
 | Date | What changed | Risk/Blocker | Next step |
 |---|---|---|---|
+| 2026-03-20 | Continued performance optimization on implemented M1 slice: replaced regex secondary token scan with single-pass linear tokenization/profile extraction in `service.py`, added bounded short-text profile cache, and reduced ledger resume/write allocations with tail-window iteration + streaming append (`17 passed`). | Heuristic scoring logic remains placeholder-grade and still needs telemetry-based coefficient tuning after provider integration. | Implement `/v1/timeline` minimal API and add benchmark checks for profile/resume hot paths to quantify gains over time. |
+| 2026-03-20 | Optimized memory/resume algorithms: replaced full split with streaming sentence iteration, merged memory-type classification into single regex pass, fixed `todo_set`/deque window consistency to avoid unbounded set growth, and added dedicated ledger unit tests (`17 passed`). | Persistence layer is still JSONL placeholder; durability and query capabilities remain limited before DB migration. | Build `/v1/timeline` minimal API and begin SQLAlchemy + Alembic baseline to replace placeholder persistence incrementally. |
+| 2026-03-20 | Implemented `/v1/resume` minimal path and memory-write placeholder: added in-process `MemoryLedger` (single-load cache + JSONL append persistence), wired chat turn ingestion, and added resume/chat integration tests (`15 passed`). | Memory persistence is currently JSONL placeholder and not yet migration-managed DB schema. | Implement `/v1/timeline` on top of ledger data and start SQLAlchemy + Alembic baseline migration path. |
 | 2026-03-20 | Completed performance-oriented refactor on chat service: consolidated text feature extraction into single-pass `MessageProfile`, enabled profile reuse in budget calculation to remove duplicate scans, and added regression test for reused profile path (`13 passed`). | Current scoring is still heuristic; true performance/quality behavior should be calibrated with live provider telemetry. | Keep current architecture and start provider integration to collect real runtime metrics for coefficient tuning. |
 | 2026-03-20 | Refactored M1 chat algorithm for maintainability and performance: consolidated repeated text scans into a single `MessageProfile` extraction pass, modularized budget/scoring strategy functions, and refreshed Chinese inline comments for key non-obvious logic. | Heuristic behavior remains deterministic and test-covered, but coefficient tuning still depends on real provider telemetry in later stages. | Keep current strategy architecture and calibrate heuristic coefficients during provider adapter integration. |
 | 2026-03-20 | Upgraded M1 chat internals with dynamic budget algorithm (complexity-aware token estimation + adaptive output reserve), computed `quality/retrieval/context_growth/balance/fallback` metadata via heuristics, and added expanded unit/integration assertions (`12 passed`). | Heuristic scores are deterministic and test-covered, but still placeholder-grade until real provider/tokenizer telemetry is integrated. | Keep this algorithm as M1 baseline and calibrate coefficients with real runtime metrics during provider integration stage. |
@@ -39,7 +42,7 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 | 2026-03-19 | Completed v1 documentation set and project handover docs. | No code scaffold yet. | Start backend scaffold and implement `/v1/health`. |
 
 ## 4. Open Risks
-1. No implementation exists yet; timeline uncertainty remains high.
+1. Current memory persistence layer is JSONL placeholder; DB migrations and consistency guarantees are pending.
 2. Embedding model and vector backend defaults are not finalized.
 3. Continuation quality may vary by provider behavior.
 

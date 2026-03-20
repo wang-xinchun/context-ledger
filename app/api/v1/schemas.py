@@ -56,3 +56,13 @@ class ChatResponse(BaseModel):
     answer: str
     meta: ChatMeta
     used_memories: list[UsedMemory] = Field(default_factory=list)
+
+
+class ResumeRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+
+
+class ResumeResponse(BaseModel):
+    project_snapshot: str
+    recent_decisions: list[str] = Field(default_factory=list)
+    open_todos: list[str] = Field(default_factory=list)

@@ -384,3 +384,64 @@ This file is the cross-session operation log for collaboration and handover.
   2. Tune heuristic coefficients with observed production-like traces.
 - Blockers:
   - None
+
+## [2026-03-20 00:52] Session Note
+- Operator: Codex
+- Summary: Implemented next M1 block: added `/v1/resume` endpoint and memory-write placeholder pipeline with in-process index + JSONL persistence, then completed regression verification.
+- Files changed:
+  - app/core/settings.py
+  - app/api/v1/schemas.py
+  - app/api/v1/service.py
+  - app/api/v1/router.py
+  - app/memory/__init__.py
+  - app/memory/ledger.py
+  - tests/conftest.py
+  - tests/integration/test_v1_chat.py
+  - tests/integration/test_v1_resume.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Use `MemoryLedger` single-load cache to avoid repeated full-file scans on every request.
+  - Use batched JSONL append writes per chat turn to reduce file-IO overhead and avoid per-record open/close churn.
+- Next actions:
+  1. Implement `/v1/timeline` minimal path based on current ledger output.
+  2. Introduce SQLAlchemy + Alembic baseline and gradually replace JSONL placeholder persistence.
+- Blockers:
+  - None
+
+## [2026-03-20 08:23] Session Note
+- Operator: Codex
+- Summary: Performed algorithm-focused optimization on memory/resume path by reducing repeated work, lowering memory overhead, and tightening data-structure consistency guarantees.
+- Files changed:
+  - app/memory/ledger.py
+  - tests/unit/test_memory_ledger.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Replace eager `split` sentence extraction with streaming iterator to avoid full intermediate list allocation on long inputs.
+  - Merge memory type detection from multiple regex scans into a single compiled regex pass per sentence.
+  - Keep `todo_set` synchronized with bounded deque eviction to prevent unbounded growth and stale-membership rejection.
+- Next actions:
+  1. Implement `/v1/timeline` minimal endpoint backed by current ledger state.
+  2. Start migration from JSONL placeholder to SQLAlchemy + Alembic persistence baseline.
+- Blockers:
+  - None
+
+## [2026-03-20 08:29] Session Note
+- Operator: Codex
+- Summary: Further optimized current M1 code path by replacing regex-based secondary token scan with single-pass linear profiling in chat service, adding short-text profile cache, and reducing resume/write allocation overhead in ledger.
+- Files changed:
+  - app/api/v1/service.py
+  - app/memory/ledger.py
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep profile caching bounded (`maxsize=512`, only for text length `<=4096`) to avoid large-message memory retention.
+  - Use tail-window extraction via iterator (`islice(reversed(deque), k)`) instead of full `list(deque)` copy in resume path.
+- Next actions:
+  1. Add `/v1/timeline` minimal endpoint and reuse optimized ledger iteration utilities.
+  2. Introduce lightweight benchmark script for `service._build_message_profile` and ledger resume hot path.
+- Blockers:
+  - None

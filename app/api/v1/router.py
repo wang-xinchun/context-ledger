@@ -4,8 +4,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.schemas import ChatRequest, ChatResponse, HealthResponse
-from app.api.v1.service import build_chat_response, build_health_response
+from app.api.v1.schemas import (
+    ChatRequest,
+    ChatResponse,
+    HealthResponse,
+    ResumeRequest,
+    ResumeResponse,
+)
+from app.api.v1.service import (
+    build_chat_response,
+    build_health_response,
+    build_resume_response,
+)
 
 router = APIRouter(prefix="/v1", tags=["v1"])
 
@@ -18,3 +28,8 @@ def get_health() -> HealthResponse:
 @router.post("/chat", response_model=ChatResponse)
 def post_chat(payload: ChatRequest) -> ChatResponse:
     return build_chat_response(payload)
+
+
+@router.post("/resume", response_model=ResumeResponse)
+def post_resume(payload: ResumeRequest) -> ResumeResponse:
+    return build_resume_response(payload)

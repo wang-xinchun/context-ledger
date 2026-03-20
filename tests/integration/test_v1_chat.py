@@ -27,6 +27,9 @@ def test_chat_endpoint_returns_minimal_meta_and_answer(client: TestClient) -> No
     assert meta["budget"]["max_context_tokens"] == 4096
     assert meta["budget"]["reserved_output_tokens"] == 700
     assert isinstance(payload["used_memories"], list)
+    assert len(payload["used_memories"]) >= 1
+    assert payload["used_memories"][0]["memory_id"].startswith("mem_")
+    assert ":" in payload["used_memories"][0]["source_ref"]
 
 
 def test_chat_budget_does_not_exceed_context_limit(client: TestClient) -> None:
