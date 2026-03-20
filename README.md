@@ -15,15 +15,15 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: `M1 health/chat/resume/timeline minimal path is runnable; SQLAlchemy + Alembic baseline integrated with SQLite engine/session performance tuning, validated on Python 3.12 runtime`
+- Code status: `M1 health/chat/resume/timeline minimal path is runnable; memory/timeline SQL dual-write path is integrated and core write path has been performance-optimized (JSONL + SQLAlchemy), validated on Python 3.12 runtime`
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
-- Overall completion: `78%`
+- Overall completion: `82%`
 
 ## Milestone Status
 | Milestone | Status | Notes |
 |---|---|---|
-| M1 Chat minimal loop | In Progress | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal path implemented; SQLAlchemy/Alembic baseline added for DB migration |
+| M1 Chat minimal loop | In Progress | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal path implemented; SQL dual-write baseline is active (`JSONL + SQLAlchemy`) |
 | M2 Context budget engine | Not Started | Add overflow degrade and output reserve |
 | M3 Response stability | Not Started | Two-phase generation + auto continuation |
 | M4 Timeline + regression | In Progress | Timeline endpoint is live; regression expansion and quality baseline still pending |

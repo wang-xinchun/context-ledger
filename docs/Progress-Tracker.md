@@ -3,12 +3,12 @@
 ## 1. Project Status
 - Last updated: `2026-03-20`
 - Current phase: `M1 Implementation (In Progress)`
-- Overall completion: `78%`
+- Overall completion: `82%`
 
 ## 2. Milestone Board
 | Milestone | Description | Owner | Status | Target Date | Notes |
 |---|---|---|---|---|---|
-| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal API implemented; SQLAlchemy + Alembic baseline scaffold added |
+| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal API implemented; SQL dual-write (`JSONL + SQLAlchemy`) scaffold integrated |
 | M2 | Context compiler + budget degrade | TBD | Not Started | TBD | |
 | M3 | Two-phase generation + continuation + quality guard | TBD | Not Started | TBD | |
 | M4 | Timeline + regression + docs freeze | TBD | In Progress | TBD | Timeline endpoint is available; quality baseline and full regression scope are pending |
@@ -22,6 +22,8 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 ## 3. Session Log
 | Date | What changed | Risk/Blocker | Next step |
 |---|---|---|---|
+| 2026-03-20 | Optimized newly integrated SQL dual-write core path: removed hot-path dynamic imports and redundant object conversion in `MemoryLedger`, switched SQL persistence from per-object ORM add to batched Core insert strategy, and reduced intermediate allocation in JSONL append path (`27 passed`). | Read path (`resume/timeline`) still serves from in-memory/JSONL view and is not yet switched to SQL query source. | Add SQL-backed read repositories and validate JSONL-vs-SQL consistency before read-path cutover. |
+| 2026-03-20 | Implemented incremental SQL migration step: wired `MemoryLedger.record_chat_turn` to dual-write into SQLAlchemy repository (project/session/turn/memory/timeline/audit), added idempotency guard by `request_id`, and kept JSONL path as fallback-safe mainline (`27 passed`). | Read path (`resume/timeline`) still uses in-memory/JSONL state only; SQL query-backed reads are not switched on yet. | Add SQL-backed read repositories for resume/timeline and introduce feature flag for read-path cutover. |
 | 2026-03-20 | Optimized newly added DB baseline for runtime efficiency: improved SQLite engine path handling, reduced unnecessary pre-ping overhead on local SQLite, enabled pragmatic write/read tuning via PRAGMA (`foreign_keys`, `journal_mode=WAL`, `synchronous=NORMAL`), and added engine-cache reset + dedicated DB session tests (`26 passed`). | Runtime business write path is still JSONL-first and not fully switched to SQLAlchemy repositories yet. | Start incremental repository migration: route memory/timeline persistence writes through SQLAlchemy while keeping API contracts unchanged. |
 | 2026-03-20 | Implemented SQL persistence baseline according v1 docs: added `app/db` module (engine/session/base/models/bootstrap), integrated Alembic scaffold + initial migration revision (`20260320_0001`) covering v1 core tables/indexes, and added DB schema/migration unit tests (`23 passed`). | Runtime write path is still JSONL-first; repository migration to SQL tables is not wired into chat/resume/timeline handlers yet. | Incrementally switch memory and timeline writes to SQLAlchemy repositories while keeping current API behavior unchanged. |
 | 2026-03-20 | Optimized timeline algorithm for time/space efficiency: narrowed timeline storage to high-value event types (`decision/risk/todo`), introduced bounded sequence-index mapping for cursor lookup, and refactored pagination into single-pass reverse slicing to reduce repeated scans and intermediate allocations (`21 passed`). | Timeline is still backed by in-memory + JSONL placeholder persistence; scalability and query/index guarantees remain limited before DB migration. | Land SQLAlchemy + Alembic baseline and migrate timeline/memory storage to DB-backed model while preserving current cursor contract. |

@@ -10,10 +10,14 @@ import json
 from pathlib import Path
 import re
 from threading import Lock
+from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from app.api.v1.schemas import UsedMemory
 from app.core import settings
+
+if TYPE_CHECKING:
+    from app.db.repositories import PersistedMemoryRecord
 
 MAX_MEMORIES_PER_TURN = 3
 MAX_DECISIONS_PER_PROJECT = 30
@@ -60,6 +64,22 @@ class ProjectState:
     timeline_events: deque[TimelineEvent] = field(default_factory=deque)
     timeline_id_to_seq: dict[str, int] = field(default_factory=dict)
     timeline_next_seq: int = 0
+
+
+class SqlWriter(Protocol):
+    def persist_chat_turn(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        request_id: str,
+        user_message: str,
+        assistant_answer: str,
+        used_input_tokens: int,
+        provider_name: str,
+        memory_records: list["PersistedMemoryRecord"],
+        created_at: str,
+    ) -> None: ...
 
 
 def _now_iso() -> str:
@@ -133,11 +153,41 @@ def _tail_items(items: deque[str], limit: int) -> list[str]:
 
 
 class MemoryLedger:
-    def __init__(self, path: Path) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        sql_write_enabled: bool = False,
+        sql_writer: SqlWriter | None = None,
+    ) -> None:
         self._path = path
         self._lock = Lock()
         self._loaded = False
         self._projects: dict[str, ProjectState] = {}
+        self._path_dir_ready = path.parent.exists()
+        self._sql_write_enabled = sql_write_enabled
+        self._sql_record_factory = None
+        self._sql_writer = sql_writer or self._build_sql_writer(sql_write_enabled)
+        if self._sql_writer is not None and self._sql_record_factory is None:
+            try:
+                from app.db.repositories import PersistedMemoryRecord
+
+                self._sql_record_factory = PersistedMemoryRecord
+            except Exception:
+                self._sql_record_factory = None
+
+    def _build_sql_writer(self, enabled: bool) -> SqlWriter | None:
+        if not enabled:
+            return None
+
+        try:
+            from app.db.repositories import PersistedMemoryRecord, SqlLedgerRepository
+
+            self._sql_record_factory = PersistedMemoryRecord
+            return SqlLedgerRepository()
+        except Exception:
+            # SQL 双写故障不应阻断主链路，初始化失败时自动降级。
+            return None
 
     def reset(self, clear_file: bool = False) -> None:
         with self._lock:
@@ -167,14 +217,22 @@ class MemoryLedger:
 
             self._loaded = True
 
-    def _append_records(self, records: list[dict[str, object]]) -> None:
-        if not records:
-            return
+    def _append_turn_and_memories(
+        self,
+        turn_record: dict[str, object],
+        memory_records: list[dict[str, object]],
+    ) -> None:
+        if not self._path_dir_ready:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path_dir_ready = True
 
-        self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a", encoding="utf-8") as handle:
-            # 生成器流式写入，减少中间列表分配。
-            handle.writelines(json.dumps(record, ensure_ascii=False) + "\n" for record in records)
+            handle.write(json.dumps(turn_record, ensure_ascii=False) + "\n")
+            if memory_records:
+                # 生成器流式写入，减少中间列表分配。
+                handle.writelines(
+                    json.dumps(record, ensure_ascii=False) + "\n" for record in memory_records
+                )
 
     def _state(self, project_id: str) -> ProjectState:
         state = self._projects.get(project_id)
@@ -292,6 +350,8 @@ class MemoryLedger:
         extracted = _extract_memory_contents(user_message)
         memories: list[UsedMemory] = []
         memory_records: list[dict[str, object]] = []
+        sql_memory_records: list["PersistedMemoryRecord"] = []
+        sql_record_factory = self._sql_record_factory
         for memory_type, content in extracted:
             memory_id = f"mem_{uuid4().hex[:12]}"
             score = TYPE_SCORE.get(memory_type, TYPE_SCORE["fact"])
@@ -318,11 +378,39 @@ class MemoryLedger:
                 }
             )
 
+            if sql_record_factory is not None:
+                sql_memory_records.append(
+                    sql_record_factory(
+                        memory_id=memory_id,
+                        memory_type=memory_type,
+                        content=content,
+                        score=score,
+                        source_ref=source_ref,
+                    )
+                )
+
         with self._lock:
-            all_records = [turn_record, *memory_records]
-            for item in all_records:
+            self._apply_record(turn_record)
+            for item in memory_records:
                 self._apply_record(item)
-            self._append_records(all_records)
+            self._append_turn_and_memories(turn_record, memory_records)
+
+        if self._sql_writer is not None:
+            try:
+                self._sql_writer.persist_chat_turn(
+                    project_id=project_id,
+                    session_id=session_id,
+                    request_id=request_id,
+                    user_message=user_message,
+                    assistant_answer=assistant_answer,
+                    used_input_tokens=used_input_tokens,
+                    provider_name=settings.DEFAULT_CHAT_PROVIDER,
+                    memory_records=sql_memory_records,
+                    created_at=created_at,
+                )
+            except Exception:
+                # SQL 双写失败不影响当前接口可用性。
+                pass
 
         return memories
 
@@ -409,4 +497,7 @@ class MemoryLedger:
             return {"items": items, "next_cursor": next_cursor}
 
 
-ledger = MemoryLedger(Path(settings.MEMORY_LEDGER_PATH))
+ledger = MemoryLedger(
+    Path(settings.MEMORY_LEDGER_PATH),
+    sql_write_enabled=settings.SQL_WRITE_ENABLED,
+)

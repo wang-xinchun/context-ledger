@@ -532,3 +532,41 @@ This file is the cross-session operation log for collaboration and handover.
   2. Add benchmark checks for SQL write/read latency after repository integration.
 - Blockers:
   - None
+
+## [2026-03-20 09:29] Session Note
+- Operator: Codex
+- Summary: Completed the next migration step by integrating SQL dual-write into `MemoryLedger` write path: chat turn ingestion now writes to both JSONL/in-memory ledger and SQLAlchemy repository with request-level idempotency guard and non-blocking failure fallback.
+- Files changed:
+  - app/core/settings.py
+  - app/db/__init__.py
+  - app/db/repositories.py
+  - app/memory/ledger.py
+  - tests/unit/test_db_repository.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep dual-write enabled by default via `CONTEXTLEDGER_SQL_WRITE_ENABLED` while preserving JSONL path as the compatibility-safe baseline.
+  - Keep SQL write failures isolated (swallow with fallback) so API availability is not coupled to SQL runtime readiness.
+- Next actions:
+  1. Add SQL-backed read repositories for `/v1/resume` and `/v1/timeline`.
+  2. Introduce read cutover flag and consistency verification tests between JSONL and SQL views.
+- Blockers:
+  - None
+
+## [2026-03-20 09:35] Session Note
+- Operator: Codex
+- Summary: Optimized the SQL dual-write hot path for performance by removing per-request dynamic conversion overhead in ledger, reducing temporary allocations during JSONL append, and switching SQL persistence to batched Core insert operations instead of per-row ORM add objects.
+- Files changed:
+  - app/db/repositories.py
+  - app/memory/ledger.py
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep SQL write path non-blocking and idempotent while prioritizing lower write amplification in the hot path.
+  - Keep feature behavior unchanged; optimization is internal-only and protected by existing regression suite.
+- Next actions:
+  1. Implement SQL-backed read path for resume/timeline.
+  2. Add consistency checks between JSONL projection and SQL query results.
+- Blockers:
+  - None
