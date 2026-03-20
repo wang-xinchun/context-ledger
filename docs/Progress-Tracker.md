@@ -3,7 +3,7 @@
 ## 1. Project Status
 - Last updated: `2026-03-20`
 - Current phase: `M1 Implementation (In Progress)`
-- Overall completion: `98%`
+- Overall completion: `99%`
 
 ## 2. Milestone Board
 | Milestone | Description | Owner | Status | Target Date | Notes |
@@ -22,6 +22,7 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 ## 3. Session Log
 | Date | What changed | Risk/Blocker | Next step |
 |---|---|---|---|
+| 2026-03-20 | Completed OpenAI-compatible endpoint implementation batch by adding contract paths for `POST /openai/v1/responses` and `POST /openai/v1/embeddings` (deterministic cached embeddings), and refactored compatibility hot path for lower time/space overhead via lightweight chat pipeline entry, reverse early-stop prompt extraction, normalized input helpers, and cached models payload; expanded compatibility tests and ran full regression (`42 passed`). | Streaming protocol conformance for compatibility endpoints is still pending; current compatibility validation is non-stream path focused. | Add streaming chunk conformance tests and benchmark checks for compatibility endpoints under larger mixed workloads. |
 | 2026-03-20 | Performed deep performance optimization on OpenAI compatibility hot path: added lightweight `run_chat_pipeline(...)` in v1 service to reduce compatibility-path Pydantic construction overhead, rewrote prompt extraction to reverse-scan with early stop on latest `user` message, consolidated error/normalization helpers to reduce repeated conversions, and cached model payload generation; verified full regression (`36 passed`) and local compatibility benchmark (`300` runs): mean `7.113ms`, p50 `5.542ms`, p95 `21.458ms`. | Benchmark is local single-node baseline; network adapter latency and streaming-path overhead are not yet represented. | Implement remaining `/openai/v1/responses` + `/openai/v1/embeddings`, then add streaming conformance + performance checks. |
 | 2026-03-20 | Expanded OpenAI-compatible gateway from skeleton to partial contract implementation: added request parsing and response mapping for `POST /openai/v1/chat/completions`, added model listing for `GET /openai/v1/models`, kept `POST /openai/v1/responses` and `POST /openai/v1/embeddings` at explicit `501` stage, and updated compatibility tests (`36 passed`). | Compatibility layer is still partial; `responses`/`embeddings` and streaming chunk conformance are pending for full L1 protocol gate. | Implement `/openai/v1/responses` + `/openai/v1/embeddings` contract paths and add streaming conformance tests. |
 | 2026-03-20 | Implemented provider adapter call path for `/v1/chat`: added provider contract (`ChatProviderRequest/Result`), deterministic adapter implementation, cached provider registry (`lmstudio/ollama/fallback`), and service-layer integration replacing direct placeholder answer generation; added dedicated registry unit tests (`35 passed`). | Provider path is now adapterized, but runtime network adapters (LM Studio/Ollama HTTP invocation with timeout/retry policies) are not yet connected. | Add real network provider adapters under registry feature flags and keep deterministic adapter as fallback-safe baseline. |
@@ -56,7 +57,7 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 
 ## 4. Open Risks
 1. SQL read cutover for `/v1/resume` and `/v1/timeline` is still default-off; staged runtime validation and parity observation under larger datasets are pending.
-2. OpenAI-compatible gateway still has partial coverage; `/openai/v1/responses` and `/openai/v1/embeddings` are not yet implemented.
+2. OpenAI-compatible gateway streaming conformance is not yet validated by dedicated chunk-level tests.
 3. Provider adapter currently uses deterministic runtime path; real network provider integration and timeout/retry guardrails are pending.
 4. Embedding model and vector backend defaults are not finalized.
 5. Continuation quality may vary by provider behavior.

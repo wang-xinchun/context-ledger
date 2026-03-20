@@ -708,3 +708,34 @@ This file is the cross-session operation log for collaboration and handover.
   2. Add streaming compatibility conformance and performance tests.
 - Blockers:
   - `git push` still blocked by current network connectivity to GitHub.
+
+## [2026-03-20 13:00] Session Note
+- Operator: Codex
+- Summary: Completed the next compatibility implementation block by delivering `/openai/v1/responses` and `/openai/v1/embeddings` contract endpoints, and applied additional hot-path optimization to reduce compatibility-layer time/space overhead.
+- Files changed:
+  - app/compatibility/openai_router.py
+  - app/api/v1/service.py
+  - tests/compatibility/test_openai_gateway_skeleton.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep embeddings deterministic and cached (`sha256`-based, bounded `lru_cache`) for predictable local performance before real embedding provider integration.
+  - Reuse lightweight `run_chat_pipeline(...)` from compatibility routes to avoid redundant model-object construction overhead.
+- Next actions:
+  1. Add streaming compatibility conformance tests and benchmark checks.
+  2. Implement real network provider adapters (LM Studio/Ollama HTTP) with timeout/retry and fallback guardrails.
+- Blockers:
+  - `git push` still blocked by current network connectivity to GitHub.
+
+## [2026-03-20 13:02] Session Note
+- Operator: Codex
+- Summary: Correction to previous entry: this batch did not modify `app/api/v1/service.py`; compatibility implementation and optimization changes were confined to `app/compatibility/openai_router.py` plus tests/docs logs.
+- Files changed:
+  - MESSAGES.md
+- Decisions:
+  - Keep append-only correction logs to preserve operational trace integrity.
+- Next actions:
+  1. Proceed with streaming compatibility conformance tests.
+- Blockers:
+  - None
