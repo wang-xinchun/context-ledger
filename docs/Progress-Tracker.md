@@ -3,12 +3,12 @@
 ## 1. Project Status
 - Last updated: `2026-03-20`
 - Current phase: `M1 Implementation (In Progress)`
-- Overall completion: `72%`
+- Overall completion: `78%`
 
 ## 2. Milestone Board
 | Milestone | Description | Owner | Status | Target Date | Notes |
 |---|---|---|---|---|---|
-| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal API implemented on JSONL ledger |
+| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal API implemented; SQLAlchemy + Alembic baseline scaffold added |
 | M2 | Context compiler + budget degrade | TBD | Not Started | TBD | |
 | M3 | Two-phase generation + continuation + quality guard | TBD | Not Started | TBD | |
 | M4 | Timeline + regression + docs freeze | TBD | In Progress | TBD | Timeline endpoint is available; quality baseline and full regression scope are pending |
@@ -22,6 +22,8 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 ## 3. Session Log
 | Date | What changed | Risk/Blocker | Next step |
 |---|---|---|---|
+| 2026-03-20 | Optimized newly added DB baseline for runtime efficiency: improved SQLite engine path handling, reduced unnecessary pre-ping overhead on local SQLite, enabled pragmatic write/read tuning via PRAGMA (`foreign_keys`, `journal_mode=WAL`, `synchronous=NORMAL`), and added engine-cache reset + dedicated DB session tests (`26 passed`). | Runtime business write path is still JSONL-first and not fully switched to SQLAlchemy repositories yet. | Start incremental repository migration: route memory/timeline persistence writes through SQLAlchemy while keeping API contracts unchanged. |
+| 2026-03-20 | Implemented SQL persistence baseline according v1 docs: added `app/db` module (engine/session/base/models/bootstrap), integrated Alembic scaffold + initial migration revision (`20260320_0001`) covering v1 core tables/indexes, and added DB schema/migration unit tests (`23 passed`). | Runtime write path is still JSONL-first; repository migration to SQL tables is not wired into chat/resume/timeline handlers yet. | Incrementally switch memory and timeline writes to SQLAlchemy repositories while keeping current API behavior unchanged. |
 | 2026-03-20 | Optimized timeline algorithm for time/space efficiency: narrowed timeline storage to high-value event types (`decision/risk/todo`), introduced bounded sequence-index mapping for cursor lookup, and refactored pagination into single-pass reverse slicing to reduce repeated scans and intermediate allocations (`21 passed`). | Timeline is still backed by in-memory + JSONL placeholder persistence; scalability and query/index guarantees remain limited before DB migration. | Land SQLAlchemy + Alembic baseline and migrate timeline/memory storage to DB-backed model while preserving current cursor contract. |
 | 2026-03-20 | Implemented `/v1/timeline` minimal path end-to-end: added timeline request/response schemas, wired `GET /v1/timeline` route with query pagination (`project_id`, `limit`, `cursor`), extended in-process memory ledger to keep bounded timeline events, and added integration/unit coverage (`20 passed`). | Timeline currently depends on in-memory + JSONL placeholder persistence, without DB-level query/index guarantees yet. | Introduce SQLAlchemy + Alembic baseline and migrate timeline/memory records to DB-backed storage incrementally. |
 | 2026-03-20 | Continued performance optimization on implemented M1 slice: replaced regex secondary token scan with single-pass linear tokenization/profile extraction in `service.py`, added bounded short-text profile cache, and reduced ledger resume/write allocations with tail-window iteration + streaming append (`17 passed`). | Heuristic scoring logic remains placeholder-grade and still needs telemetry-based coefficient tuning after provider integration. | Implement `/v1/timeline` minimal API and add benchmark checks for profile/resume hot paths to quantify gains over time. |

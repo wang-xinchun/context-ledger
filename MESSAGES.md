@@ -486,3 +486,49 @@ This file is the cross-session operation log for collaboration and handover.
   2. Add micro-benchmark script to track pagination and profile extraction hot-path performance over iterations.
 - Blockers:
   - None
+
+## [2026-03-20 09:05] Session Note
+- Operator: Codex
+- Summary: Completed SQL persistence baseline implementation from project docs by adding SQLAlchemy ORM schema + session infrastructure, Alembic migration scaffold, and initial revision for v1 core tables/indexes; validated with dedicated schema/migration tests.
+- Files changed:
+  - pyproject.toml
+  - app/core/settings.py
+  - app/db/__init__.py
+  - app/db/base.py
+  - app/db/bootstrap.py
+  - app/db/models.py
+  - app/db/session.py
+  - alembic.ini
+  - alembic/env.py
+  - alembic/script.py.mako
+  - alembic/versions/20260320_0001_initial_schema.py
+  - tests/unit/test_db_schema.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep DB baseline additive and non-breaking: current runtime still uses JSONL path while SQL schema is introduced for staged migration.
+  - Keep Alembic URL sourced from `CONTEXTLEDGER_SQL_DSN` to support environment-specific migrations without code edits.
+- Next actions:
+  1. Implement repository layer for memory/timeline writes and migrate handler paths from JSONL to SQLAlchemy incrementally.
+  2. Add migration + rollback check in CI to guarantee schema evolution safety.
+- Blockers:
+  - `pip install -e .[dev]` currently fails due multi-top-level package discovery in setuptools configuration; dependency install used direct package install as a temporary workaround.
+
+## [2026-03-20 09:12] Session Note
+- Operator: Codex
+- Summary: Performed time/space optimization on the newly added DB baseline by tuning SQLite engine behavior, removing unnecessary local pre-ping overhead, and adding engine-cache reset control plus targeted DB session regression tests.
+- Files changed:
+  - app/db/session.py
+  - app/db/__init__.py
+  - tests/unit/test_db_session.py
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep `pool_pre_ping` enabled for non-SQLite backends only; disable it for local SQLite to cut per-checkout overhead.
+  - Enable SQLite PRAGMA defaults (`foreign_keys=ON`, `journal_mode=WAL`, `synchronous=NORMAL`) for better local throughput while preserving integrity constraints.
+- Next actions:
+  1. Migrate memory/timeline write path from JSONL placeholder to SQLAlchemy repositories.
+  2. Add benchmark checks for SQL write/read latency after repository integration.
+- Blockers:
+  - None

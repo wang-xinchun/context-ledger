@@ -15,15 +15,15 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: `M1 health/chat/resume/timeline minimal path is runnable; timeline cursor pagination algorithm and memory footprint were further optimized, validated on Python 3.12 runtime`
+- Code status: `M1 health/chat/resume/timeline minimal path is runnable; SQLAlchemy + Alembic baseline integrated with SQLite engine/session performance tuning, validated on Python 3.12 runtime`
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
-- Overall completion: `72%`
+- Overall completion: `78%`
 
 ## Milestone Status
 | Milestone | Status | Notes |
 |---|---|---|
-| M1 Chat minimal loop | In Progress | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal path implemented on memory ledger placeholder |
+| M1 Chat minimal loop | In Progress | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal path implemented; SQLAlchemy/Alembic baseline added for DB migration |
 | M2 Context budget engine | Not Started | Add overflow degrade and output reserve |
 | M3 Response stability | Not Started | Two-phase generation + auto continuation |
 | M4 Timeline + regression | In Progress | Timeline endpoint is live; regression expansion and quality baseline still pending |
@@ -47,6 +47,11 @@ ContextLedger solves this with a middle layer:
 - [Handover Guide](./docs/Handover-Guide-v1.md)
 - [Session Messages Log](./MESSAGES.md)
 
+## Database Migration Baseline
+- Alembic config: [`alembic.ini`](./alembic.ini)
+- Migration scripts: [`alembic/`](./alembic)
+- Initial revision: [`20260320_0001_initial_schema.py`](./alembic/versions/20260320_0001_initial_schema.py)
+
 ## Core Capabilities (v1 Scope)
 - Auto memory ingestion from chat turns
 - Hybrid retrieval for project context
@@ -62,7 +67,7 @@ ContextLedger solves this with a middle layer:
 4. Before transfer, verify [Handover Guide](./docs/Handover-Guide-v1.md) checklist.
 
 ## Immediate Next Action
-1. Add SQLAlchemy + Alembic scaffold and initial migration baseline (replace JSONL placeholder progressively).
+1. Migrate memory/timeline write path from JSONL placeholder to SQLAlchemy repositories incrementally.
 2. Replace placeholder chat response with provider adapter call path.
 3. Expand OpenAI-compatible endpoints from `501` skeleton to contract-compliant responses.
 4. Add benchmark checks for profile extraction and timeline/resume hot paths.
