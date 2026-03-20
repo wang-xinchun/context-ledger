@@ -672,3 +672,39 @@ This file is the cross-session operation log for collaboration and handover.
   2. Continue OpenAI-compatible endpoint expansion from `501` skeleton toward contract-compliant responses.
 - Blockers:
   - `git push` still blocked by current network connectivity to GitHub.
+
+## [2026-03-20 12:10] Session Note
+- Operator: Codex
+- Summary: Implemented next docs-driven block for compatibility gateway by upgrading `/openai/v1/chat/completions` and `/openai/v1/models` from `501` to contract-compatible responses, with validation and metadata mapping to current `/v1/chat` pipeline.
+- Files changed:
+  - app/compatibility/openai_router.py
+  - tests/compatibility/test_openai_gateway_skeleton.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep compatibility rollout incremental: implement chat/models first, keep `/openai/v1/responses` and `/openai/v1/embeddings` explicit `501` until dedicated adapters are wired.
+  - Return ContextLedger internal signals under `x_contextledger` extension field while preserving core OpenAI payload shape.
+- Next actions:
+  1. Implement `/openai/v1/responses` and `/openai/v1/embeddings` contract paths.
+  2. Add streaming chunk conformance tests for compatibility layer.
+- Blockers:
+  - `git push` still blocked by current network connectivity to GitHub.
+
+## [2026-03-20 12:35] Session Note
+- Operator: Codex
+- Summary: Completed an intensive optimization pass for the newly added OpenAI compatibility block, focusing on hot-path CPU/memory efficiency and lower object churn.
+- Files changed:
+  - app/api/v1/service.py
+  - app/compatibility/openai_router.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Introduced lightweight `run_chat_pipeline(...)` and reused it from compatibility endpoint to avoid extra request/response model construction on this path.
+  - Replaced forward full-scan prompt extraction with reverse early-stop scan and cached model payload generation for lower per-request overhead.
+- Next actions:
+  1. Implement `/openai/v1/responses` and `/openai/v1/embeddings` contract paths.
+  2. Add streaming compatibility conformance and performance tests.
+- Blockers:
+  - `git push` still blocked by current network connectivity to GitHub.

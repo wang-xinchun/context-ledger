@@ -78,6 +78,20 @@ class MessageProfile:
     estimated_input_tokens: int
 
 
+@dataclass(frozen=True, slots=True)
+class ChatRuntimeResult:
+    request_id: str
+    answer: str
+    continuations: int
+    quality_score: float
+    retrieval_quality_score: float
+    context_growth_ratio: float
+    balance_mode: str
+    fallback_mode: str
+    budget: BudgetMeta
+    used_memories: list[UsedMemory]
+
+
 def build_health_response() -> HealthResponse:
     return HealthResponse(
         version=settings.APP_VERSION,
@@ -356,12 +370,19 @@ def _estimate_quality_score(
     return round(_clamp(score, 0.0, 1.0), 3)
 
 
-def build_chat_response(payload: ChatRequest) -> ChatResponse:
+def run_chat_pipeline(
+    *,
+    project_id: str,
+    session_id: str,
+    message: str,
+    max_output_tokens: int,
+    stream: bool = False,
+) -> ChatRuntimeResult:
     request_id = f"req_{uuid4().hex[:12]}"
-    profile = _build_message_profile(payload.message)
+    profile = _build_message_profile(message)
     budget = _build_budget(
-        payload.options.max_output_tokens,
-        payload.message,
+        max_output_tokens,
+        message,
         profile=profile,
     )
 
@@ -371,13 +392,13 @@ def build_chat_response(payload: ChatRequest) -> ChatResponse:
     )
     retrieval_quality_score = _estimate_retrieval_quality_score(profile)
     fallback_mode = _determine_fallback_mode(
-        requested_output_tokens=payload.options.max_output_tokens,
+        requested_output_tokens=max_output_tokens,
         reserved_output_tokens=budget.reserved_output_tokens,
         context_growth_ratio=context_growth_ratio,
     )
     balance_mode = _determine_balance_mode(
         context_growth_ratio=context_growth_ratio,
-        requested_output_tokens=payload.options.max_output_tokens,
+        requested_output_tokens=max_output_tokens,
         fallback_mode=fallback_mode,
     )
     quality_score = _estimate_quality_score(
@@ -391,13 +412,13 @@ def build_chat_response(payload: ChatRequest) -> ChatResponse:
     provider_result = provider.generate(
         ChatProviderRequest(
             request_id=request_id,
-            project_id=payload.project_id,
-            session_id=payload.session_id,
-            message=payload.message,
-            max_output_tokens=payload.options.max_output_tokens,
+            project_id=project_id,
+            session_id=session_id,
+            message=message,
+            max_output_tokens=max_output_tokens,
             reserved_output_tokens=budget.reserved_output_tokens,
             used_input_tokens=budget.used_input_tokens,
-            stream=payload.options.stream,
+            stream=stream,
         )
     )
     answer = provider_result.answer
@@ -405,29 +426,51 @@ def build_chat_response(payload: ChatRequest) -> ChatResponse:
     try:
         # memory 写入异常不应阻断主聊天路径，先降级返回结果。
         used_memories = ledger.record_chat_turn(
-            project_id=payload.project_id,
-            session_id=payload.session_id,
+            project_id=project_id,
+            session_id=session_id,
             request_id=request_id,
-            user_message=payload.message,
+            user_message=message,
             assistant_answer=answer,
             used_input_tokens=budget.used_input_tokens,
         )
     except Exception:
         used_memories = []
 
-    return ChatResponse(
+    return ChatRuntimeResult(
+        request_id=request_id,
         answer=answer,
-        meta=ChatMeta(
-            request_id=request_id,
-            continuations=0,
-            quality_score=quality_score,
-            retrieval_quality_score=retrieval_quality_score,
-            context_growth_ratio=context_growth_ratio,
-            balance_mode=balance_mode,
-            fallback_mode=fallback_mode,
-            budget=budget,
-        ),
+        continuations=0,
+        quality_score=quality_score,
+        retrieval_quality_score=retrieval_quality_score,
+        context_growth_ratio=context_growth_ratio,
+        balance_mode=balance_mode,
+        fallback_mode=fallback_mode,
+        budget=budget,
         used_memories=used_memories,
+    )
+
+
+def build_chat_response(payload: ChatRequest) -> ChatResponse:
+    runtime = run_chat_pipeline(
+        project_id=payload.project_id,
+        session_id=payload.session_id,
+        message=payload.message,
+        max_output_tokens=payload.options.max_output_tokens,
+        stream=payload.options.stream,
+    )
+    return ChatResponse(
+        answer=runtime.answer,
+        meta=ChatMeta(
+            request_id=runtime.request_id,
+            continuations=runtime.continuations,
+            quality_score=runtime.quality_score,
+            retrieval_quality_score=runtime.retrieval_quality_score,
+            context_growth_ratio=runtime.context_growth_ratio,
+            balance_mode=runtime.balance_mode,
+            fallback_mode=runtime.fallback_mode,
+            budget=runtime.budget,
+        ),
+        used_memories=runtime.used_memories,
     )
 
 

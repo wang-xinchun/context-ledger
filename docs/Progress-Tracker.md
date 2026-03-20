@@ -3,7 +3,7 @@
 ## 1. Project Status
 - Last updated: `2026-03-20`
 - Current phase: `M1 Implementation (In Progress)`
-- Overall completion: `95%`
+- Overall completion: `98%`
 
 ## 2. Milestone Board
 | Milestone | Description | Owner | Status | Target Date | Notes |
@@ -22,6 +22,8 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 ## 3. Session Log
 | Date | What changed | Risk/Blocker | Next step |
 |---|---|---|---|
+| 2026-03-20 | Performed deep performance optimization on OpenAI compatibility hot path: added lightweight `run_chat_pipeline(...)` in v1 service to reduce compatibility-path Pydantic construction overhead, rewrote prompt extraction to reverse-scan with early stop on latest `user` message, consolidated error/normalization helpers to reduce repeated conversions, and cached model payload generation; verified full regression (`36 passed`) and local compatibility benchmark (`300` runs): mean `7.113ms`, p50 `5.542ms`, p95 `21.458ms`. | Benchmark is local single-node baseline; network adapter latency and streaming-path overhead are not yet represented. | Implement remaining `/openai/v1/responses` + `/openai/v1/embeddings`, then add streaming conformance + performance checks. |
+| 2026-03-20 | Expanded OpenAI-compatible gateway from skeleton to partial contract implementation: added request parsing and response mapping for `POST /openai/v1/chat/completions`, added model listing for `GET /openai/v1/models`, kept `POST /openai/v1/responses` and `POST /openai/v1/embeddings` at explicit `501` stage, and updated compatibility tests (`36 passed`). | Compatibility layer is still partial; `responses`/`embeddings` and streaming chunk conformance are pending for full L1 protocol gate. | Implement `/openai/v1/responses` + `/openai/v1/embeddings` contract paths and add streaming conformance tests. |
 | 2026-03-20 | Implemented provider adapter call path for `/v1/chat`: added provider contract (`ChatProviderRequest/Result`), deterministic adapter implementation, cached provider registry (`lmstudio/ollama/fallback`), and service-layer integration replacing direct placeholder answer generation; added dedicated registry unit tests (`35 passed`). | Provider path is now adapterized, but runtime network adapters (LM Studio/Ollama HTTP invocation with timeout/retry policies) are not yet connected. | Add real network provider adapters under registry feature flags and keep deterministic adapter as fallback-safe baseline. |
 | 2026-03-20 | Applied another high-performance optimization round for SQL read path: refactored timeline latest cache to project-bucketed structure (write invalidation from O(total latest-cache keys) to O(1) per project), optimized timeline paging sort/filter path by removing `coalesce` ordering from hot query, reduced resume cache-hit payload reads via request-id-first lookup, and added Alembic migration `20260320_0002` for read-path indexes (`idx_turns_project_role_created_at`, `idx_timeline_project_created_at_id`, `idx_timeline_project_memory_id`) with schema assertions (`32 passed`). | Benchmark gains are local-environment measurements; runtime profile validation under larger/mixed traffic still pending before default read cutover. | Run staged cutover validation (`CONTEXTLEDGER_SQL_READ_ENABLED=true`) with real workload samples and capture p95 parity metrics. |
 | 2026-03-20 | Completed SQL read-path performance batch: added bounded latest-page cache for timeline (`cursor=None`) and public cache-clear API, created repeatable benchmark script `scripts/run_sql_read_benchmark.py`, and validated cache correctness with additional repository tests (`32 passed`). Latest benchmark baseline (sample run): resume p95 `8.719ms -> 2.405ms`, timeline latest p95 `2.903ms -> 0.009ms`, timeline cursor p95 `6.036ms -> 3.674ms`. | Baseline is from local environment and sample dataset; cutover readiness still requires staged runtime validation under larger data and mixed traffic. | Enable staged read cutover validation (`CONTEXTLEDGER_SQL_READ_ENABLED=true`) in runtime profile and record parity/p95 observations. |
@@ -54,9 +56,10 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 
 ## 4. Open Risks
 1. SQL read cutover for `/v1/resume` and `/v1/timeline` is still default-off; staged runtime validation and parity observation under larger datasets are pending.
-2. Provider adapter currently uses deterministic runtime path; real network provider integration and timeout/retry guardrails are pending.
-3. Embedding model and vector backend defaults are not finalized.
-4. Continuation quality may vary by provider behavior.
+2. OpenAI-compatible gateway still has partial coverage; `/openai/v1/responses` and `/openai/v1/embeddings` are not yet implemented.
+3. Provider adapter currently uses deterministic runtime path; real network provider integration and timeout/retry guardrails are pending.
+4. Embedding model and vector backend defaults are not finalized.
+5. Continuation quality may vary by provider behavior.
 
 ## 5. Decision Notes
 1. Keep `LM Studio + Qwen32B` as test profile only.
