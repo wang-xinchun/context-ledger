@@ -15,10 +15,10 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: `M1 health/chat/resume/timeline minimal path is runnable; SQL dual-write + SQL read repository path are integrated with feature flags (`CONTEXTLEDGER_SQL_WRITE_ENABLED` / `CONTEXTLEDGER_SQL_READ_ENABLED`), SQL read hot path has bounded multi-level cache optimization + O(1) project cache invalidation, and DB read indexes are migration-managed (`20260320_0002`) with benchmark/regression guards (validated on Python 3.12 runtime)`
+- Code status: M1 health/chat/resume/timeline minimal path is runnable; `/v1/chat` has moved from placeholder answer to provider-adapter call path (deterministic provider registry for `lmstudio/ollama/fallback`), SQL read path remains optimized with bounded caches + index migration (`20260320_0002`), validated on Python 3.12 runtime
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
-- Overall completion: `93%`
+- Overall completion: `95%`
 
 ## Milestone Status
 | Milestone | Status | Notes |
@@ -68,8 +68,8 @@ ContextLedger solves this with a middle layer:
 
 ## Immediate Next Action
 1. Start staged runtime validation for SQL read cutover (`CONTEXTLEDGER_SQL_READ_ENABLED=true`) using benchmark baseline and parity checks.
-2. Replace placeholder chat response with provider adapter call path.
-3. Expand OpenAI-compatible endpoints from `501` skeleton to contract-compliant responses.
+2. Expand OpenAI-compatible endpoints from `501` skeleton to contract-compliant responses.
+3. Extend provider registry with real network adapters and timeout/retry guards behind feature flags.
 4. Extend benchmark checks for profile extraction and chat budget hot paths.
 5. Fix packaging so `pip install -e .[dev]` works without manual dependency fallbacks.
 

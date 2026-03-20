@@ -21,6 +21,8 @@ DEFAULT_MAX_CONTEXT_TOKENS = int(os.getenv("CONTEXTLEDGER_MAX_CONTEXT_TOKENS", "
 DEFAULT_RESERVED_OUTPUT_TOKENS = int(
     os.getenv("CONTEXTLEDGER_RESERVED_OUTPUT_TOKENS", "900")
 )
+LMSTUDIO_DEFAULT_MODEL = os.getenv("CONTEXTLEDGER_LMSTUDIO_MODEL", "qwen2.5-32b-instruct")
+OLLAMA_DEFAULT_MODEL = os.getenv("CONTEXTLEDGER_OLLAMA_MODEL", "qwen2.5:32b")
 SQL_DSN = os.getenv(
     "CONTEXTLEDGER_SQL_DSN",
     f"sqlite:///{(Path('data') / 'contextledger.db').as_posix()}",

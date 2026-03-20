@@ -23,6 +23,8 @@ from app.api.v1.schemas import (
 )
 from app.core import settings
 from app.memory import ledger
+from app.providers.base import ChatProviderRequest
+from app.providers.registry import get_chat_provider
 
 
 PUNCTUATION_SYMBOLS = frozenset({",", ".", ";", ":", "?", "!", "，", "。", "？", "！"})
@@ -385,7 +387,20 @@ def build_chat_response(payload: ChatRequest) -> ChatResponse:
         profile=profile,
     )
 
-    answer = f"[contextledger:m1] message received: {payload.message}"
+    provider = get_chat_provider(settings.DEFAULT_CHAT_PROVIDER)
+    provider_result = provider.generate(
+        ChatProviderRequest(
+            request_id=request_id,
+            project_id=payload.project_id,
+            session_id=payload.session_id,
+            message=payload.message,
+            max_output_tokens=payload.options.max_output_tokens,
+            reserved_output_tokens=budget.reserved_output_tokens,
+            used_input_tokens=budget.used_input_tokens,
+            stream=payload.options.stream,
+        )
+    )
+    answer = provider_result.answer
     used_memories: list[UsedMemory] = []
     try:
         # memory 写入异常不应阻断主聊天路径，先降级返回结果。

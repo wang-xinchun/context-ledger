@@ -649,3 +649,26 @@ This file is the cross-session operation log for collaboration and handover.
   2. Continue implementation of provider adapter path for `/v1/chat`.
 - Blockers:
   - `git push` still blocked by current network connectivity to GitHub.
+
+## [2026-03-20 11:50] Session Note
+- Operator: Codex
+- Summary: Implemented the next code block from docs by replacing `/v1/chat` placeholder answer path with provider-adapter invocation (contract + registry + deterministic provider), and added provider-focused unit tests.
+- Files changed:
+  - app/api/v1/service.py
+  - app/core/settings.py
+  - app/providers/__init__.py
+  - app/providers/base.py
+  - app/providers/deterministic_provider.py
+  - app/providers/registry.py
+  - tests/unit/test_provider_registry.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep deterministic provider as default-safe adapter baseline so regression and local runs stay stable without external dependencies.
+  - Cache provider instances in registry (`lru_cache`) to avoid per-request reconstruction overhead.
+- Next actions:
+  1. Add real network adapters (LM Studio/Ollama HTTP) with timeout/retry and fallback policy.
+  2. Continue OpenAI-compatible endpoint expansion from `501` skeleton toward contract-compliant responses.
+- Blockers:
+  - `git push` still blocked by current network connectivity to GitHub.
