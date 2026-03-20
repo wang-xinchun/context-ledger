@@ -43,3 +43,44 @@ def test_todo_set_keeps_in_sync_with_deque_window(tmp_path) -> None:
         used_input_tokens=1,
     )
     assert "next todo item 0" in state.todos
+
+
+def test_build_timeline_cursor_and_limit(tmp_path) -> None:
+    ledger = MemoryLedger(tmp_path / "memory.jsonl")
+    project_id = "proj_timeline_unit"
+
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id="sess_1",
+        request_id="req_1",
+        user_message="we will choose postgres",
+        assistant_answer="ok",
+        used_input_tokens=1,
+    )
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id="sess_1",
+        request_id="req_2",
+        user_message="there is risk of migration drift",
+        assistant_answer="ok",
+        used_input_tokens=1,
+    )
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id="sess_1",
+        request_id="req_3",
+        user_message="next we need to add timeline tests",
+        assistant_answer="ok",
+        used_input_tokens=1,
+    )
+
+    page_1 = ledger.build_timeline(project_id, limit=2)
+    assert len(page_1["items"]) == 2
+    assert page_1["items"][0]["type"] == "todo"
+    assert page_1["items"][1]["type"] == "risk"
+    assert page_1["next_cursor"] == page_1["items"][-1]["id"]
+
+    page_2 = ledger.build_timeline(project_id, limit=2, cursor=page_1["next_cursor"])
+    assert len(page_2["items"]) == 1
+    assert page_2["items"][0]["type"] == "decision"
+    assert page_2["next_cursor"] is None

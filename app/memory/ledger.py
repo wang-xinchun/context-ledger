@@ -18,6 +18,7 @@ from app.core import settings
 MAX_MEMORIES_PER_TURN = 3
 MAX_DECISIONS_PER_PROJECT = 30
 MAX_TODOS_PER_PROJECT = 50
+MAX_TIMELINE_EVENTS_PER_PROJECT = 200
 
 MEMORY_TYPE_PATTERN = re.compile(
     r"(?P<todo>\b(?:todo|next|need(?:\s+to)?|follow[-\s]?up)\b|\u5f85\u529e|\u4e0b\u4e00\u6b65|\u540e\u7eed|\u9700\u8981)"
@@ -35,6 +36,15 @@ TYPE_SCORE = {
     "constraint": 0.82,
     "fact": 0.75,
 }
+TIMELINE_MEMORY_TYPES = frozenset(TYPE_SCORE.keys())
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineEvent:
+    id: str
+    type: str
+    content: str
+    timestamp: str
 
 
 @dataclass(slots=True)
@@ -46,6 +56,9 @@ class ProjectState:
     decisions: deque[str] = field(default_factory=lambda: deque(maxlen=MAX_DECISIONS_PER_PROJECT))
     todos: deque[str] = field(default_factory=lambda: deque(maxlen=MAX_TODOS_PER_PROJECT))
     todo_set: set[str] = field(default_factory=set)
+    timeline_events: deque[TimelineEvent] = field(
+        default_factory=lambda: deque(maxlen=MAX_TIMELINE_EVENTS_PER_PROJECT)
+    )
 
 
 def _now_iso() -> str:
@@ -210,6 +223,20 @@ class MemoryLedger:
         elif memory_type == "todo":
             self._append_todo(state, content)
 
+        if memory_type in TIMELINE_MEMORY_TYPES:
+            event_id = str(record.get("memory_id", "")).strip()
+            if not event_id:
+                event_id = f"evt_{uuid4().hex[:12]}"
+            timestamp = str(record.get("created_at", "")).strip() or _now_iso()
+            state.timeline_events.append(
+                TimelineEvent(
+                    id=event_id,
+                    type=memory_type,
+                    content=content,
+                    timestamp=timestamp,
+                )
+            )
+
     def record_chat_turn(
         self,
         *,
@@ -295,6 +322,55 @@ class MemoryLedger:
                 "recent_decisions": _tail_items(state.decisions, 5),
                 "open_todos": _tail_items(state.todos, 10),
             }
+
+    def build_timeline(
+        self,
+        project_id: str,
+        *,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> dict[str, object]:
+        self._ensure_loaded()
+        safe_limit = max(1, min(limit, 100))
+
+        with self._lock:
+            state = self._projects.get(project_id)
+            if state is None or not state.timeline_events:
+                return {"items": [], "next_cursor": None}
+
+            events = state.timeline_events
+            start_idx = len(events) - 1
+
+            # cursor 指向上一页最后一个事件，下一页从它之前的更旧事件继续。
+            if cursor:
+                matched = False
+                for idx in range(len(events) - 1, -1, -1):
+                    if events[idx].id == cursor:
+                        start_idx = idx - 1
+                        matched = True
+                        break
+                if not matched:
+                    start_idx = len(events) - 1
+
+            if start_idx < 0:
+                return {"items": [], "next_cursor": None}
+
+            items: list[dict[str, str]] = []
+            idx = start_idx
+            while idx >= 0 and len(items) < safe_limit:
+                event = events[idx]
+                items.append(
+                    {
+                        "id": event.id,
+                        "type": event.type,
+                        "content": event.content,
+                        "timestamp": event.timestamp,
+                    }
+                )
+                idx -= 1
+
+            next_cursor = items[-1]["id"] if idx >= 0 and items else None
+            return {"items": items, "next_cursor": next_cursor}
 
 
 ledger = MemoryLedger(Path(settings.MEMORY_LEDGER_PATH))

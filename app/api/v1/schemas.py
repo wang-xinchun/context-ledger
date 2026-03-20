@@ -66,3 +66,21 @@ class ResumeResponse(BaseModel):
     project_snapshot: str
     recent_decisions: list[str] = Field(default_factory=list)
     open_todos: list[str] = Field(default_factory=list)
+
+
+class TimelineRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    limit: int = Field(default=20, ge=1, le=100)
+    cursor: str | None = None
+
+
+class TimelineItem(BaseModel):
+    id: str
+    type: str
+    content: str
+    timestamp: str
+
+
+class TimelineResponse(BaseModel):
+    items: list[TimelineItem] = Field(default_factory=list)
+    next_cursor: str | None = None

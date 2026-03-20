@@ -3,15 +3,15 @@
 ## 1. Project Status
 - Last updated: `2026-03-20`
 - Current phase: `M1 Implementation (In Progress)`
-- Overall completion: `66%`
+- Overall completion: `72%`
 
 ## 2. Milestone Board
 | Milestone | Description | Owner | Status | Target Date | Notes |
 |---|---|---|---|---|---|
-| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | `/v1/health` + `/v1/chat` + `/v1/resume` with memory-write placeholder implemented |
+| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal API implemented on JSONL ledger |
 | M2 | Context compiler + budget degrade | TBD | Not Started | TBD | |
 | M3 | Two-phase generation + continuation + quality guard | TBD | Not Started | TBD | |
-| M4 | Timeline + regression + docs freeze | TBD | Not Started | TBD | |
+| M4 | Timeline + regression + docs freeze | TBD | In Progress | TBD | Timeline endpoint is available; quality baseline and full regression scope are pending |
 | M5 | Provider expansion + team deployment profile | TBD | Not Started | TBD | |
 | U1 | Adaptive retrieval + uncertainty scoring + telemetry | TBD | Planned | TBD | v2 upgrade |
 | U2 | Memory graph + policy-as-code + hybrid retrieval | TBD | Planned | TBD | v2 upgrade |
@@ -22,6 +22,7 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 ## 3. Session Log
 | Date | What changed | Risk/Blocker | Next step |
 |---|---|---|---|
+| 2026-03-20 | Implemented `/v1/timeline` minimal path end-to-end: added timeline request/response schemas, wired `GET /v1/timeline` route with query pagination (`project_id`, `limit`, `cursor`), extended in-process memory ledger to keep bounded timeline events, and added integration/unit coverage (`20 passed`). | Timeline currently depends on in-memory + JSONL placeholder persistence, without DB-level query/index guarantees yet. | Introduce SQLAlchemy + Alembic baseline and migrate timeline/memory records to DB-backed storage incrementally. |
 | 2026-03-20 | Continued performance optimization on implemented M1 slice: replaced regex secondary token scan with single-pass linear tokenization/profile extraction in `service.py`, added bounded short-text profile cache, and reduced ledger resume/write allocations with tail-window iteration + streaming append (`17 passed`). | Heuristic scoring logic remains placeholder-grade and still needs telemetry-based coefficient tuning after provider integration. | Implement `/v1/timeline` minimal API and add benchmark checks for profile/resume hot paths to quantify gains over time. |
 | 2026-03-20 | Optimized memory/resume algorithms: replaced full split with streaming sentence iteration, merged memory-type classification into single regex pass, fixed `todo_set`/deque window consistency to avoid unbounded set growth, and added dedicated ledger unit tests (`17 passed`). | Persistence layer is still JSONL placeholder; durability and query capabilities remain limited before DB migration. | Build `/v1/timeline` minimal API and begin SQLAlchemy + Alembic baseline to replace placeholder persistence incrementally. |
 | 2026-03-20 | Implemented `/v1/resume` minimal path and memory-write placeholder: added in-process `MemoryLedger` (single-load cache + JSONL append persistence), wired chat turn ingestion, and added resume/chat integration tests (`15 passed`). | Memory persistence is currently JSONL placeholder and not yet migration-managed DB schema. | Implement `/v1/timeline` on top of ledger data and start SQLAlchemy + Alembic baseline migration path. |

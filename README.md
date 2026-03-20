@@ -15,18 +15,18 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: `M1 health/chat/resume path is runnable; memory ledger algorithms optimized (stream sentence parsing + single-pass classification + deque/set consistency fix), validated on Python 3.12 runtime`
+- Code status: `M1 health/chat/resume/timeline minimal path is runnable; chat/memory algorithms optimized and validated on Python 3.12 runtime`
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
-- Overall completion: `66%`
+- Overall completion: `72%`
 
 ## Milestone Status
 | Milestone | Status | Notes |
 |---|---|---|
-| M1 Chat minimal loop | In Progress | `/v1/health` + `/v1/chat` + `/v1/resume` and memory-write placeholder are implemented; performance tuning completed for memory ledger; continue with `/v1/timeline` + DB migration baseline |
+| M1 Chat minimal loop | In Progress | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal path implemented on memory ledger placeholder |
 | M2 Context budget engine | Not Started | Add overflow degrade and output reserve |
 | M3 Response stability | Not Started | Two-phase generation + auto continuation |
-| M4 Timeline + regression | Not Started | Timeline endpoint and quality baseline |
+| M4 Timeline + regression | In Progress | Timeline endpoint is live; regression expansion and quality baseline still pending |
 | M5 Evolvability extension | Not Started | Provider expansion and team deployment profile |
 | U1 Advanced runtime control | Planned | Adaptive retrieval + uncertainty fields + telemetry |
 | U2 Hybrid intelligence layer | Planned | Memory graph + policy-as-code + hybrid retrieval |
@@ -62,10 +62,10 @@ ContextLedger solves this with a middle layer:
 4. Before transfer, verify [Handover Guide](./docs/Handover-Guide-v1.md) checklist.
 
 ## Immediate Next Action
-1. Implement `/v1/timeline` minimal path on top of current memory ledger output.
-2. Add SQLAlchemy + Alembic scaffold and initial migration baseline (replace JSONL placeholder progressively).
-3. Replace placeholder chat response with provider adapter call path.
-4. Expand OpenAI-compatible endpoints from `501` skeleton to contract-compliant responses.
+1. Add SQLAlchemy + Alembic scaffold and initial migration baseline (replace JSONL placeholder progressively).
+2. Replace placeholder chat response with provider adapter call path.
+3. Expand OpenAI-compatible endpoints from `501` skeleton to contract-compliant responses.
+4. Add benchmark checks for profile extraction and timeline/resume hot paths.
 5. Keep all new files aligned with `docs/File-Management-Plan-v1.md`.
 
 ## License

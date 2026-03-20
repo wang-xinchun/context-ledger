@@ -16,6 +16,9 @@ from app.api.v1.schemas import (
     ProviderInfo,
     ResumeRequest,
     ResumeResponse,
+    TimelineItem,
+    TimelineRequest,
+    TimelineResponse,
     UsedMemory,
 )
 from app.core import settings
@@ -419,4 +422,26 @@ def build_resume_response(payload: ResumeRequest) -> ResumeResponse:
         project_snapshot=str(snapshot.get("project_snapshot", "")),
         recent_decisions=[str(item) for item in snapshot.get("recent_decisions", [])],
         open_todos=[str(item) for item in snapshot.get("open_todos", [])],
+    )
+
+
+def build_timeline_response(payload: TimelineRequest) -> TimelineResponse:
+    timeline = ledger.build_timeline(
+        payload.project_id,
+        limit=payload.limit,
+        cursor=payload.cursor,
+    )
+    return TimelineResponse(
+        items=[
+            TimelineItem(
+                id=str(item.get("id", "")),
+                type=str(item.get("type", "fact")),
+                content=str(item.get("content", "")),
+                timestamp=str(item.get("timestamp", "")),
+            )
+            for item in timeline.get("items", [])
+        ],
+        next_cursor=(
+            str(timeline["next_cursor"]) if timeline.get("next_cursor") is not None else None
+        ),
     )

@@ -445,3 +445,25 @@ This file is the cross-session operation log for collaboration and handover.
   2. Introduce lightweight benchmark script for `service._build_message_profile` and ledger resume hot path.
 - Blockers:
   - None
+
+## [2026-03-20 08:40] Session Note
+- Operator: Codex
+- Summary: Implemented the next planned block `/v1/timeline` with cursor pagination, including schema/router/service wiring, bounded in-memory timeline event indexing in `MemoryLedger`, and regression coverage updates.
+- Files changed:
+  - app/api/v1/schemas.py
+  - app/api/v1/router.py
+  - app/api/v1/service.py
+  - app/memory/ledger.py
+  - tests/integration/test_v1_timeline.py
+  - tests/unit/test_memory_ledger.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep timeline pagination cursor based on `memory_id` of the last item in the current page for deterministic paging on append-only event sequences.
+  - Keep timeline storage bounded in-process (`MAX_TIMELINE_EVENTS_PER_PROJECT`) to control memory growth before DB migration.
+- Next actions:
+  1. Add SQLAlchemy + Alembic baseline and migrate timeline/memory persistence off JSONL incrementally.
+  2. Add benchmark checks for timeline/resume path and message profile hot path.
+- Blockers:
+  - None
