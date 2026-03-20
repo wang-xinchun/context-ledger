@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import re
 from threading import Lock
+import time
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
@@ -23,6 +24,8 @@ MAX_MEMORIES_PER_TURN = 3
 MAX_DECISIONS_PER_PROJECT = 30
 MAX_TODOS_PER_PROJECT = 50
 MAX_TIMELINE_EVENTS_PER_PROJECT = 200
+STATE_LOCK_STRIPES = 64
+MEMORY_EXTRACTION_CHAR_LIMIT = 4096
 
 MEMORY_TYPE_PATTERN = re.compile(
     r"(?P<todo>\b(?:todo|next|need(?:\s+to)?|follow[-\s]?up)\b|\u5f85\u529e|\u4e0b\u4e00\u6b65|\u540e\u7eed|\u9700\u8981)"
@@ -135,6 +138,9 @@ def _extract_memory_contents(text: str) -> list[tuple[str, str]]:
     提取候选 memory（type, content）。
     M1 采用轻量规则引擎，保证路径可控且易于回归验证。
     """
+    if len(text) > MEMORY_EXTRACTION_CHAR_LIMIT:
+        text = text[:MEMORY_EXTRACTION_CHAR_LIMIT]
+
     extracted: list[tuple[str, str]] = []
     seen: set[str] = set()
 
@@ -175,7 +181,10 @@ class MemoryLedger:
         sql_reader: SqlReader | None = None,
     ) -> None:
         self._path = path
-        self._lock = Lock()
+        self._load_lock = Lock()
+        self._projects_lock = Lock()
+        self._state_locks = tuple(Lock() for _ in range(STATE_LOCK_STRIPES))
+        self._file_lock = Lock()
         self._loaded = False
         self._projects: dict[str, ProjectState] = {}
         self._path_dir_ready = path.parent.exists()
@@ -187,6 +196,15 @@ class MemoryLedger:
             sql_read_enabled,
             prefer=self._sql_writer,
         )
+        self._sql_write_gate = Lock() if settings.SQL_WRITE_BACKPRESSURE_ENABLED else None
+        self._sql_retry_queue: deque[dict[str, object]] = deque()
+        self._sql_retry_lock = Lock()
+        self._sql_skipped_writes = 0
+        self._sql_enqueued_writes = 0
+        self._sql_dropped_writes = 0
+        self._sql_replayed_writes = 0
+        self._sql_replay_failed_writes = 0
+        self._sql_direct_failed_writes = 0
         if self._sql_writer is not None and self._sql_record_factory is None:
             try:
                 from app.db.repositories import PersistedMemoryRecord
@@ -250,17 +268,111 @@ class MemoryLedger:
             return None
 
     def reset(self, clear_file: bool = False) -> None:
-        with self._lock:
-            self._projects.clear()
-            self._loaded = True
-            if clear_file and self._path.exists():
-                self._path.unlink()
+        with self._load_lock:
+            acquired: list[Lock] = []
+            try:
+                for lock in self._state_locks:
+                    lock.acquire()
+                    acquired.append(lock)
+                with self._projects_lock:
+                    self._projects.clear()
+                self._loaded = True
+            finally:
+                while acquired:
+                    acquired.pop().release()
+        if clear_file:
+            with self._file_lock:
+                if self._path.exists():
+                    self._path.unlink()
+
+    def _state_lock_for_project(self, project_id: str) -> Lock:
+        return self._state_locks[hash(project_id) % STATE_LOCK_STRIPES]
+
+    def _persist_sql_payload(self, payload: dict[str, object]) -> bool:
+        writer = self._sql_writer
+        if writer is None:
+            return False
+        try:
+            writer.persist_chat_turn(
+                project_id=str(payload["project_id"]),
+                session_id=str(payload["session_id"]),
+                request_id=str(payload["request_id"]),
+                user_message=str(payload["user_message"]),
+                assistant_answer=str(payload["assistant_answer"]),
+                used_input_tokens=int(payload["used_input_tokens"]),
+                provider_name=str(payload["provider_name"]),
+                memory_records=payload["memory_records"],  # type: ignore[arg-type]
+                created_at=str(payload["created_at"]),
+            )
+            return True
+        except Exception:
+            return False
+
+    def _enqueue_sql_retry_payload(self, payload: dict[str, object]) -> None:
+        max_queue = max(0, int(settings.SQL_WRITE_RETRY_QUEUE_MAX))
+        with self._sql_retry_lock:
+            self._sql_skipped_writes += 1
+            if max_queue <= 0:
+                self._sql_dropped_writes += 1
+                return
+            if len(self._sql_retry_queue) >= max_queue:
+                self._sql_retry_queue.popleft()
+                self._sql_dropped_writes += 1
+            self._sql_retry_queue.append(payload)
+            self._sql_enqueued_writes += 1
+
+    def _pop_sql_retry_payload(self) -> dict[str, object] | None:
+        with self._sql_retry_lock:
+            if not self._sql_retry_queue:
+                return None
+            return self._sql_retry_queue.popleft()
+
+    def _drain_sql_retry_queue(self) -> None:
+        max_batch = max(0, int(settings.SQL_WRITE_RETRY_DRAIN_BATCH))
+        if max_batch <= 0:
+            return
+
+        budget_ms = max(0.0, float(settings.SQL_WRITE_RETRY_DRAIN_BUDGET_MS))
+        if budget_ms <= 0:
+            return
+        budget_ns = int(budget_ms * 1_000_000)
+        started_ns = time.perf_counter_ns()
+
+        drained = 0
+        while drained < max_batch:
+            if time.perf_counter_ns() - started_ns >= budget_ns:
+                break
+
+            payload = self._pop_sql_retry_payload()
+            if payload is None:
+                break
+
+            if self._persist_sql_payload(payload):
+                with self._sql_retry_lock:
+                    self._sql_replayed_writes += 1
+            else:
+                with self._sql_retry_lock:
+                    self._sql_replay_failed_writes += 1
+            drained += 1
+
+    def sql_write_backpressure_stats(self) -> dict[str, int | bool]:
+        with self._sql_retry_lock:
+            return {
+                "enabled": self._sql_write_gate is not None,
+                "pending_queue_size": len(self._sql_retry_queue),
+                "skipped_writes": self._sql_skipped_writes,
+                "enqueued_writes": self._sql_enqueued_writes,
+                "dropped_writes": self._sql_dropped_writes,
+                "replayed_writes": self._sql_replayed_writes,
+                "replay_failed_writes": self._sql_replay_failed_writes,
+                "direct_failed_writes": self._sql_direct_failed_writes,
+            }
 
     def _ensure_loaded(self) -> None:
         if self._loaded:
             return
 
-        with self._lock:
+        with self._load_lock:
             if self._loaded:
                 return
 
@@ -282,24 +394,31 @@ class MemoryLedger:
         turn_record: dict[str, object],
         memory_records: list[dict[str, object]],
     ) -> None:
-        if not self._path_dir_ready:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path_dir_ready = True
+        serialized_lines = [json.dumps(turn_record, ensure_ascii=False), "\n"]
+        if memory_records:
+            for record in memory_records:
+                serialized_lines.append(json.dumps(record, ensure_ascii=False))
+                serialized_lines.append("\n")
 
-        with self._path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(turn_record, ensure_ascii=False) + "\n")
-            if memory_records:
-                # 生成器流式写入，减少中间列表分配。
-                handle.writelines(
-                    json.dumps(record, ensure_ascii=False) + "\n" for record in memory_records
-                )
+        with self._file_lock:
+            if not self._path_dir_ready:
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                self._path_dir_ready = True
+
+            with self._path.open("a", encoding="utf-8") as handle:
+                handle.write("".join(serialized_lines))
 
     def _state(self, project_id: str) -> ProjectState:
-        state = self._projects.get(project_id)
-        if state is None:
-            state = ProjectState()
-            self._projects[project_id] = state
-        return state
+        with self._projects_lock:
+            state = self._projects.get(project_id)
+            if state is None:
+                state = ProjectState()
+                self._projects[project_id] = state
+            return state
+
+    def _get_state(self, project_id: str) -> ProjectState | None:
+        with self._projects_lock:
+            return self._projects.get(project_id)
 
     def _append_todo(self, state: ProjectState, content: str) -> None:
         key = content.casefold()
@@ -348,6 +467,10 @@ class MemoryLedger:
             return
 
         state = self._state(project_id)
+        self._apply_record_to_state(state, record)
+
+    def _apply_record_to_state(self, state: ProjectState, record: dict[str, object]) -> None:
+        kind = record.get("kind")
 
         if kind == "turn":
             state.turn_count += 1
@@ -391,6 +514,7 @@ class MemoryLedger:
         user_message: str,
         assistant_answer: str,
         used_input_tokens: int,
+        return_used_memories: bool = True,
     ) -> list[UsedMemory]:
         self._ensure_loaded()
         created_at = _now_iso()
@@ -409,20 +533,22 @@ class MemoryLedger:
 
         extracted = _extract_memory_contents(user_message)
         memories: list[UsedMemory] = []
+        append_memory = memories.append
         memory_records: list[dict[str, object]] = []
         sql_memory_records: list["PersistedMemoryRecord"] = []
         sql_record_factory = self._sql_record_factory
-        for memory_type, content in extracted:
-            memory_id = f"mem_{uuid4().hex[:12]}"
+        for index, (memory_type, content) in enumerate(extracted):
+            memory_id = f"mem_{request_id}_{index}"
             score = TYPE_SCORE.get(memory_type, TYPE_SCORE["fact"])
-            memories.append(
-                UsedMemory(
-                    memory_id=memory_id,
-                    type=memory_type,
-                    score=score,
-                    source_ref=source_ref,
+            if return_used_memories:
+                append_memory(
+                    UsedMemory(
+                        memory_id=memory_id,
+                        type=memory_type,
+                        score=score,
+                        source_ref=source_ref,
+                    )
                 )
-            )
             memory_records.append(
                 {
                     "kind": "memory",
@@ -449,28 +575,45 @@ class MemoryLedger:
                     )
                 )
 
-        with self._lock:
-            self._apply_record(turn_record)
+        state_lock = self._state_lock_for_project(project_id)
+        with state_lock:
+            state = self._state(project_id)
+            self._apply_record_to_state(state, turn_record)
             for item in memory_records:
-                self._apply_record(item)
-            self._append_turn_and_memories(turn_record, memory_records)
+                self._apply_record_to_state(state, item)
+        self._append_turn_and_memories(turn_record, memory_records)
 
         if self._sql_writer is not None:
-            try:
-                self._sql_writer.persist_chat_turn(
-                    project_id=project_id,
-                    session_id=session_id,
-                    request_id=request_id,
-                    user_message=user_message,
-                    assistant_answer=assistant_answer,
-                    used_input_tokens=used_input_tokens,
-                    provider_name=settings.DEFAULT_CHAT_PROVIDER,
-                    memory_records=sql_memory_records,
-                    created_at=created_at,
-                )
-            except Exception:
-                # SQL 双写失败不影响当前接口可用性。
-                pass
+            sql_payload: dict[str, object] = {
+                "project_id": project_id,
+                "session_id": session_id,
+                "request_id": request_id,
+                "user_message": user_message,
+                "assistant_answer": assistant_answer,
+                "used_input_tokens": used_input_tokens,
+                "provider_name": settings.DEFAULT_CHAT_PROVIDER,
+                "memory_records": sql_memory_records,
+                "created_at": created_at,
+            }
+            gate = self._sql_write_gate
+            acquired = False
+            if gate is None:
+                acquired = True
+            else:
+                acquire_timeout = max(0.0, float(settings.SQL_WRITE_LOCK_ACQUIRE_TIMEOUT_SECONDS))
+                acquired = gate.acquire(timeout=acquire_timeout)
+
+            if acquired:
+                try:
+                    if not self._persist_sql_payload(sql_payload):
+                        with self._sql_retry_lock:
+                            self._sql_direct_failed_writes += 1
+                    self._drain_sql_retry_queue()
+                finally:
+                    if gate is not None:
+                        gate.release()
+            else:
+                self._enqueue_sql_retry_payload(sql_payload)
 
         return memories
 
@@ -480,8 +623,9 @@ class MemoryLedger:
             return sql_snapshot
 
         self._ensure_loaded()
-        with self._lock:
-            state = self._projects.get(project_id)
+        state_lock = self._state_lock_for_project(project_id)
+        with state_lock:
+            state = self._get_state(project_id)
             if state is None or state.turn_count == 0:
                 return {
                     "project_snapshot": "No conversation history is available for this project yet.",
@@ -520,8 +664,9 @@ class MemoryLedger:
         self._ensure_loaded()
         safe_limit = max(1, min(limit, 100))
 
-        with self._lock:
-            state = self._projects.get(project_id)
+        state_lock = self._state_lock_for_project(project_id)
+        with state_lock:
+            state = self._get_state(project_id)
             if state is None or not state.timeline_events:
                 return {"items": [], "next_cursor": None}
 

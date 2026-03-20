@@ -1,4 +1,4 @@
-"""Database engine/session helpers."""
+﻿"""Database engine/session helpers."""
 
 from __future__ import annotations
 
@@ -31,22 +31,28 @@ def _ensure_sqlite_parent_dir(url: URL) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _sqlite_timeout_seconds() -> float:
+    return max(0.1, float(settings.SQLITE_TIMEOUT_SECONDS))
+
+
 def _connect_args(url: URL) -> dict[str, object]:
     if _is_sqlite(url):
-        # SQLite 本地模式下禁用线程检查并增加超时，减少锁竞争重试成本。
-        return {"check_same_thread": False, "timeout": 30}
+        return {
+            "check_same_thread": False,
+            "timeout": _sqlite_timeout_seconds(),
+        }
     return {}
 
 
-def _configure_sqlite_pragma(engine: Engine) -> None:
+def _configure_sqlite_pragma(engine: Engine, *, busy_timeout_ms: int) -> None:
     @event.listens_for(engine, "connect")
     def _set_sqlite_pragma(dbapi_connection, _connection_record) -> None:
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute("PRAGMA foreign_keys=ON")
-            # WAL + NORMAL 组合在本地写密集场景下通常吞吐更高且资源占用可控。
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
         finally:
             cursor.close()
 
@@ -63,7 +69,8 @@ def get_engine() -> Engine:
         connect_args=_connect_args(url),
     )
     if _is_sqlite(url):
-        _configure_sqlite_pragma(engine)
+        busy_timeout_ms = int(_sqlite_timeout_seconds() * 1000)
+        _configure_sqlite_pragma(engine, busy_timeout_ms=busy_timeout_ms)
     return engine
 
 
@@ -79,10 +86,7 @@ def get_session_factory() -> sessionmaker[Session]:
 
 
 def reset_engine_state() -> None:
-    """
-    清理引擎与 Session 工厂缓存。
-    主要用于测试/环境切换，避免复用旧连接配置。
-    """
+    """Clear engine/sessionmaker caches for tests and environment switching."""
     if get_engine.cache_info().currsize:
         get_engine().dispose()
     get_session_factory.cache_clear()

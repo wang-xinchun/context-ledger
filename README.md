@@ -15,7 +15,7 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: M1 health/chat/resume/timeline minimal path is runnable; `/v1/chat` runs through provider-adapter registry, and OpenAI compatibility layer now supports `/openai/v1/chat/completions`, `/openai/v1/responses`, `/openai/v1/embeddings`, `/openai/v1/models` with hot-path optimizations (reverse early-stop prompt extraction, lightweight runtime pipeline call, cached model payload, deterministic embedding cache); SQL read-path optimization + index migration (`20260320_0002`) validated on Python 3.12 runtime
+- Code status: M1 health/chat/resume/timeline minimal path is runnable; `/v1/chat` runs through provider-adapter registry, and OpenAI compatibility layer now supports `/openai/v1/chat/completions`, `/openai/v1/responses`, `/openai/v1/embeddings`, `/openai/v1/models` with hot-path optimizations (reverse early-stop prompt extraction, lightweight runtime pipeline call, cached model payload, deterministic embedding cache, stream-path lazy payload construction, SSE byte-frame output, embedding byte-lookup acceleration, embedding payload-byte cache, and budget-aware deterministic provider truncation); compatibility route now supports performance-oriented persistence policy switch (`CONTEXTLEDGER_COMPAT_CHAT_PERSIST_TURN`, default `false`) for lower tail latency under mixed load; SQL read-path optimization + index migration (`20260320_0002`) validated on Python 3.12 runtime
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
 - Overall completion: `99%`
@@ -68,7 +68,7 @@ ContextLedger solves this with a middle layer:
 
 ## Immediate Next Action
 1. Start staged runtime validation for SQL read cutover (`CONTEXTLEDGER_SQL_READ_ENABLED=true`) using benchmark baseline and parity checks.
-2. Add streaming compatibility conformance tests and performance checks for OpenAI-compatible endpoints.
+2. Define and implement durability policy for compatibility traffic (`persist_on` vs `persist_off`) with an explicit reconciliation path for low-latency mode.
 3. Extend provider registry with real network adapters and timeout/retry guards behind feature flags.
 4. Extend benchmark checks for profile extraction and chat budget hot paths.
 5. Fix packaging so `pip install -e .[dev]` works without manual dependency fallbacks.

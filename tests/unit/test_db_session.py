@@ -37,6 +37,21 @@ def test_sqlite_pragmas_are_applied(tmp_path, monkeypatch) -> None:
     db_session.reset_engine_state()
 
 
+def test_sqlite_busy_timeout_respects_setting(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "busy-timeout.db"
+    monkeypatch.setattr(settings, "SQL_DSN", _sqlite_url(db_path))
+    monkeypatch.setattr(settings, "SQLITE_TIMEOUT_SECONDS", 1.25)
+    db_session.reset_engine_state()
+
+    engine = db_session.get_engine()
+    with engine.connect() as conn:
+        busy_timeout = conn.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
+
+    assert int(busy_timeout) == 1250
+
+    db_session.reset_engine_state()
+
+
 def test_reset_engine_state_rebuilds_engine(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "rebuild.db"
     monkeypatch.setattr(settings, "SQL_DSN", _sqlite_url(db_path))

@@ -1,4 +1,4 @@
-"""Deterministic local provider for M1 adapter wiring."""
+﻿"""Deterministic local provider for M1 adapter wiring."""
 
 from __future__ import annotations
 
@@ -11,16 +11,18 @@ class DeterministicChatProvider:
         self._model_name = model_name
 
     def generate(self, request: ChatProviderRequest) -> ChatProviderResult:
-        # M1 阶段先打通 Provider Adapter 调用链；
-        # 响应保持确定性，避免引入外部网络依赖导致回归不稳定。
-        answer = (
-            f"[{self._provider_name}:{self._model_name}] "
-            f"message received: {request.message}"
-        )
+        # 按输出预算进行确定性截断，避免长输入在压测时放大回显开销。
+        prefix = f"[{self._provider_name}:{self._model_name}] message received: "
+        message = request.message.strip()
+        char_budget = max(32, request.max_output_tokens * 4)
+        if len(message) > char_budget:
+            clipped = message[: max(1, char_budget - 10)] + "...[trunc]"
+        else:
+            clipped = message
+
         return ChatProviderResult(
-            answer=answer,
+            answer=prefix + clipped,
             provider_name=self._provider_name,
             model_name=self._model_name,
             latency_ms=0,
         )
-

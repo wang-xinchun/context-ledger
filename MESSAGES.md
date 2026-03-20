@@ -739,3 +739,128 @@ This file is the cross-session operation log for collaboration and handover.
   1. Proceed with streaming compatibility conformance tests.
 - Blockers:
   - None
+
+## [2026-03-20 13:40] Session Note
+- Operator: Codex
+- Summary: Implemented OpenAI-compatible streaming protocol baseline for `chat/responses` with SSE framing (`data: ...` + `data: [DONE]`), reduced compatibility-path duplication via shared payload builders, and added chunk-level conformance tests.
+- Files changed:
+  - app/compatibility/openai_router.py
+  - tests/compatibility/test_openai_gateway_skeleton.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep stream and non-stream payload construction on shared helper functions to reduce object churn and maintenance cost.
+  - Use conservative L1-compatible SSE event sequence now; defer advanced event granularity tuning to future provider-network integration stage.
+- Next actions:
+  1. Add streaming-path benchmark script/checks and capture p50/p95 + memory metrics.
+  2. Implement real LM Studio/Ollama network adapters with timeout/retry/fallback flags.
+- Blockers:
+  - None
+
+## [2026-03-20 16:10] Session Note
+- Operator: Codex
+- Summary: Completed an extreme performance optimization batch for the implemented compatibility/core path and added a repeatable OpenAI gateway benchmark script with measured local baseline.
+- Files changed:
+  - app/compatibility/openai_router.py
+  - app/api/v1/service.py
+  - scripts/run_openai_compat_benchmark.py
+  - scripts/README.md
+  - tests/compatibility/test_openai_gateway_skeleton.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Stream path now avoids unnecessary non-stream payload construction and emits SSE bytes directly to reduce encode overhead and transient allocations.
+  - Deterministic embedding vector generation now uses byte-to-float lookup + preallocated fixed buffer to reduce CPU and list growth churn.
+- Next actions:
+  1. Add mixed-load/perf-stress benchmark profile (long prompts, larger embedding batches, stream concurrency) and track p95/p99 deltas.
+  2. Proceed with real LM Studio/Ollama network adapter implementation under timeout/retry/fallback flags.
+- Blockers:
+  - None
+
+## [2026-03-20 16:45] Session Note
+- Operator: Codex
+- Summary: Ran mixed-load stress benchmark matrix for OpenAI-compatible gateway (concurrent stream + long prompts + large embedding batches) and captured p99-tail baseline for optimization planning.
+- Files changed:
+  - output/benchmarks/openai-compat-benchmark.json
+  - output/benchmarks/openai-compat-benchmark-mixed-w16.json
+  - output/benchmarks/openai-compat-benchmark-mixed-embed192.json
+  - scripts/README.md
+  - docs/Progress-Tracker.md
+  - README.md
+  - MESSAGES.md
+- Decisions:
+  - Use `w12/c30/prompt12000/embed128` as main mixed-load reference profile (balanced signal quality + runtime cost).
+  - Keep `w16/c20` and `embed192` profiles as high-pressure regression gates for p99-tail tracking.
+- Next actions:
+  1. Reduce mixed chat/responses p99 tail (queue/backpressure/async strategy) and rerun the same matrix.
+  2. Keep embeddings large-batch path optimized and stable while reducing chat/responses contention.
+- Blockers:
+  - None
+
+## [2026-03-20 17:05] Session Note
+- Operator: Codex
+- Summary: Completed second-stage performance optimization targeting mixed-load p99 tails by reducing SQLite write-lock wait time and shrinking memory-ledger lock contention windows.
+- Files changed:
+  - app/core/settings.py
+  - app/db/session.py
+  - app/memory/ledger.py
+  - tests/unit/test_db_session.py
+  - docs/Progress-Tracker.md
+  - README.md
+  - MESSAGES.md
+- Decisions:
+  - Introduce configurable SQLite fail-fast timeout (`CONTEXTLEDGER_SQLITE_TIMEOUT_SECONDS`, default `2.0`) and apply both connect timeout and PRAGMA `busy_timeout` to cap long lock waits.
+  - Split ledger synchronization into state lock + file lock, and move file append out of state critical section to improve concurrent request throughput.
+- Next actions:
+  1. Implement queue/backpressure policy for compatibility chat/responses path to continue reducing mixed-load p99 tails.
+  2. Re-run `w12/c30`, `w16/c20`, and `embed192` stress profiles for before/after comparison.
+- Blockers:
+  - None
+
+## [2026-03-20 17:40] Session Note
+- Operator: Codex
+- Summary: Completed deep mixed-load p99 optimization by introducing SQL write backpressure gating and compatibility-path allocation cuts; validated major tail-latency compression under high-pressure profiles.
+- Files changed:
+  - app/core/settings.py
+  - app/memory/ledger.py
+  - app/api/v1/service.py
+  - app/compatibility/openai_router.py
+  - tests/unit/test_memory_ledger.py
+  - scripts/README.md
+  - docs/Progress-Tracker.md
+  - README.md
+  - MESSAGES.md
+- Decisions:
+  - Enable SQL dual-write backpressure gate by default to prioritize API latency stability under SQLite write-lock contention bursts.
+  - Keep backpressure behavior explicitly configurable (`CONTEXTLEDGER_SQL_WRITE_BACKPRESSURE_ENABLED`, `CONTEXTLEDGER_SQL_WRITE_LOCK_ACQUIRE_TIMEOUT_SECONDS`) for environment-specific durability/latency tradeoff.
+- Next actions:
+  1. Add skipped-SQL-write reconciliation strategy and metrics counters for observability.
+  2. Keep benchmark comparisons on isolated DB/memory paths to reduce cross-run data-size drift noise.
+- Blockers:
+  - None
+
+## [2026-03-20 18:30] Session Note
+- Operator: Codex
+- Summary: Continued extreme performance optimization with compatibility-route persistence split and payload-level serialization optimization, then validated via clean-DB mixed-load benchmarks and full regression.
+- Files changed:
+  - app/core/settings.py
+  - app/api/v1/service.py
+  - app/memory/ledger.py
+  - app/compatibility/openai_router.py
+  - app/providers/deterministic_provider.py
+  - scripts/run_openai_compat_benchmark.py
+  - tests/unit/test_memory_ledger.py
+  - docs/Progress-Tracker.md
+  - README.md
+  - scripts/README.md
+  - MESSAGES.md
+- Decisions:
+  - Default compatibility path now prioritizes latency by not persisting compat turns (`CONTEXTLEDGER_COMPAT_CHAT_PERSIST_TURN=false` by default), while keeping `/v1/chat` behavior unchanged.
+  - Introduced SQL backpressure queue statistics and benchmark export to support durability-vs-latency tradeoff analysis.
+- Next actions:
+  1. Implement explicit reconciliation flow for deployments requiring compat-traffic persistence in low-latency mode.
+  2. Publish a two-profile SLO baseline (`persist_on` vs `persist_off`) for production tuning.
+- Blockers:
+  - None

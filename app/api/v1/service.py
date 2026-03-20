@@ -153,24 +153,31 @@ def _compute_message_profile(text: str) -> MessageProfile:
     code_keyword_hits = 0
     anchor_hits = 0
     unique_tokens: set[str] = set()
+    unique_tokens_add = unique_tokens.add
+    anchor_keywords = ANCHOR_KEYWORDS
+    code_keywords = CODE_KEYWORDS
+    text_local = text
     current_token_kind = TOKEN_KIND_NONE
     token_start = -1
 
     def _consume_token(start: int, end: int, token_kind: int) -> None:
         nonlocal token_count, latin_token_count, code_keyword_hits, anchor_hits
-        normalized = text[start:end].lower()
-        token_count += 1
-        unique_tokens.add(normalized)
-
-        if normalized in ANCHOR_KEYWORDS:
-            anchor_hits += 1
+        raw_token = text_local[start:end]
         if token_kind == TOKEN_KIND_ASCII:
+            normalized = raw_token.lower()
             latin_token_count += 1
-            if normalized in CODE_KEYWORDS:
+            if normalized in code_keywords:
                 code_keyword_hits += 1
+        else:
+            normalized = raw_token
+        token_count += 1
+        unique_tokens_add(normalized)
+
+        if normalized in anchor_keywords:
+            anchor_hits += 1
 
     # 单次线性扫描：同时完成字符统计 + token 切分，减少正则二次扫描开销。
-    for index, char in enumerate(text):
+    for index, char in enumerate(text_local):
         if char == "\n":
             line_breaks += 1
         if char in PUNCTUATION_SYMBOLS:
@@ -196,7 +203,7 @@ def _compute_message_profile(text: str) -> MessageProfile:
         current_token_kind = token_kind
 
     if current_token_kind != TOKEN_KIND_NONE and token_start >= 0:
-        _consume_token(token_start, len(text), current_token_kind)
+        _consume_token(token_start, len(text_local), current_token_kind)
 
     code_hint_hits = min(code_keyword_hits, 8) + (2 if backtick_count >= 3 else 1 if backtick_count > 0 else 0)
 
@@ -377,6 +384,8 @@ def run_chat_pipeline(
     message: str,
     max_output_tokens: int,
     stream: bool = False,
+    collect_used_memories: bool = True,
+    persist_turn: bool = True,
 ) -> ChatRuntimeResult:
     request_id = f"req_{uuid4().hex[:12]}"
     profile = _build_message_profile(message)
@@ -423,18 +432,20 @@ def run_chat_pipeline(
     )
     answer = provider_result.answer
     used_memories: list[UsedMemory] = []
-    try:
-        # memory 写入异常不应阻断主聊天路径，先降级返回结果。
-        used_memories = ledger.record_chat_turn(
-            project_id=project_id,
-            session_id=session_id,
-            request_id=request_id,
-            user_message=message,
-            assistant_answer=answer,
-            used_input_tokens=budget.used_input_tokens,
-        )
-    except Exception:
-        used_memories = []
+    if persist_turn:
+        try:
+            # memory 写入异常不应阻断主聊天路径，先降级返回结果。
+            used_memories = ledger.record_chat_turn(
+                project_id=project_id,
+                session_id=session_id,
+                request_id=request_id,
+                user_message=message,
+                assistant_answer=answer,
+                used_input_tokens=budget.used_input_tokens,
+                return_used_memories=collect_used_memories,
+            )
+        except Exception:
+            used_memories = []
 
     return ChatRuntimeResult(
         request_id=request_id,

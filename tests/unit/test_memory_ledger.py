@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.memory.ledger import MAX_MEMORIES_PER_TURN, MAX_TODOS_PER_PROJECT, MemoryLedger, _extract_memory_contents
+from app.core import settings
 
 
 def test_extract_memory_contents_is_bounded_and_stable() -> None:
@@ -139,3 +140,162 @@ def test_sql_read_failure_falls_back_to_memory_view(tmp_path) -> None:
     assert "Captured 1 turns" in resume["project_snapshot"]
     assert len(timeline["items"]) == 1
     assert timeline["items"][0]["type"] == "decision"
+
+
+def test_sql_write_backpressure_skips_when_gate_is_busy(tmp_path, monkeypatch) -> None:
+    class RecordingWriter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist_chat_turn(self, **kwargs) -> None:  # noqa: ANN003
+            self.calls += 1
+
+    monkeypatch.setattr(settings, "SQL_WRITE_BACKPRESSURE_ENABLED", True)
+    monkeypatch.setattr(settings, "SQL_WRITE_LOCK_ACQUIRE_TIMEOUT_SECONDS", 0.0)
+
+    writer = RecordingWriter()
+    ledger = MemoryLedger(
+        tmp_path / "memory.jsonl",
+        sql_write_enabled=True,
+        sql_writer=writer,
+    )
+
+    assert ledger._sql_write_gate is not None  # nosec: B101
+    ledger._sql_write_gate.acquire()
+    try:
+        ledger.record_chat_turn(
+            project_id="proj_bp_skip",
+            session_id="sess_1",
+            request_id="req_1",
+            user_message="we will choose postgres",
+            assistant_answer="ok",
+            used_input_tokens=1,
+        )
+    finally:
+        ledger._sql_write_gate.release()
+
+    assert writer.calls == 0
+    stats = ledger.sql_write_backpressure_stats()
+    assert stats["skipped_writes"] >= 1
+    assert stats["pending_queue_size"] >= 1
+
+
+def test_sql_write_backpressure_allows_when_gate_is_free(tmp_path, monkeypatch) -> None:
+    class RecordingWriter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist_chat_turn(self, **kwargs) -> None:  # noqa: ANN003
+            self.calls += 1
+
+    monkeypatch.setattr(settings, "SQL_WRITE_BACKPRESSURE_ENABLED", True)
+    monkeypatch.setattr(settings, "SQL_WRITE_LOCK_ACQUIRE_TIMEOUT_SECONDS", 0.0)
+
+    writer = RecordingWriter()
+    ledger = MemoryLedger(
+        tmp_path / "memory.jsonl",
+        sql_write_enabled=True,
+        sql_writer=writer,
+    )
+    ledger.record_chat_turn(
+        project_id="proj_bp_ok",
+        session_id="sess_1",
+        request_id="req_1",
+        user_message="next we need to add tests",
+        assistant_answer="ok",
+        used_input_tokens=1,
+    )
+
+    assert writer.calls == 1
+
+
+def test_sql_write_backpressure_replays_pending_on_next_success(tmp_path, monkeypatch) -> None:
+    class RecordingWriter:
+        def __init__(self) -> None:
+            self.request_ids: list[str] = []
+
+        def persist_chat_turn(self, **kwargs) -> None:  # noqa: ANN003
+            self.request_ids.append(str(kwargs["request_id"]))
+
+    monkeypatch.setattr(settings, "SQL_WRITE_BACKPRESSURE_ENABLED", True)
+    monkeypatch.setattr(settings, "SQL_WRITE_LOCK_ACQUIRE_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(settings, "SQL_WRITE_RETRY_DRAIN_BATCH", 8)
+    monkeypatch.setattr(settings, "SQL_WRITE_RETRY_DRAIN_BUDGET_MS", 50.0)
+
+    writer = RecordingWriter()
+    ledger = MemoryLedger(
+        tmp_path / "memory.jsonl",
+        sql_write_enabled=True,
+        sql_writer=writer,
+    )
+
+    assert ledger._sql_write_gate is not None  # nosec: B101
+    ledger._sql_write_gate.acquire()
+    try:
+        ledger.record_chat_turn(
+            project_id="proj_bp_replay",
+            session_id="sess_1",
+            request_id="req_skipped",
+            user_message="we will choose postgres",
+            assistant_answer="ok",
+            used_input_tokens=1,
+        )
+    finally:
+        ledger._sql_write_gate.release()
+
+    ledger.record_chat_turn(
+        project_id="proj_bp_replay",
+        session_id="sess_1",
+        request_id="req_live",
+        user_message="next we need to add tests",
+        assistant_answer="ok",
+        used_input_tokens=1,
+    )
+
+    assert "req_live" in writer.request_ids
+    assert "req_skipped" in writer.request_ids
+    stats = ledger.sql_write_backpressure_stats()
+    assert stats["pending_queue_size"] == 0
+    assert stats["replayed_writes"] >= 1
+
+
+def test_sql_write_backpressure_drops_oldest_when_queue_full(tmp_path, monkeypatch) -> None:
+    class RecordingWriter:
+        def persist_chat_turn(self, **kwargs) -> None:  # noqa: ANN003
+            return None
+
+    monkeypatch.setattr(settings, "SQL_WRITE_BACKPRESSURE_ENABLED", True)
+    monkeypatch.setattr(settings, "SQL_WRITE_LOCK_ACQUIRE_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(settings, "SQL_WRITE_RETRY_QUEUE_MAX", 1)
+
+    ledger = MemoryLedger(
+        tmp_path / "memory.jsonl",
+        sql_write_enabled=True,
+        sql_writer=RecordingWriter(),
+    )
+
+    assert ledger._sql_write_gate is not None  # nosec: B101
+    ledger._sql_write_gate.acquire()
+    try:
+        ledger.record_chat_turn(
+            project_id="proj_bp_drop",
+            session_id="sess_1",
+            request_id="req_1",
+            user_message="we will choose postgres",
+            assistant_answer="ok",
+            used_input_tokens=1,
+        )
+        ledger.record_chat_turn(
+            project_id="proj_bp_drop",
+            session_id="sess_1",
+            request_id="req_2",
+            user_message="next we need to add tests",
+            assistant_answer="ok",
+            used_input_tokens=1,
+        )
+    finally:
+        ledger._sql_write_gate.release()
+
+    stats = ledger.sql_write_backpressure_stats()
+    assert stats["pending_queue_size"] == 1
+    assert stats["dropped_writes"] >= 1

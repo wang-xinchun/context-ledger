@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
+import json
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Response, status
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.api.v1.service import ChatRuntimeResult, run_chat_pipeline
 from app.core import settings
@@ -21,11 +23,18 @@ DEFAULT_COMPAT_SESSION_ID = "compat_session"
 OPENAI_CHAT_DEFAULT_MAX_TOKENS = 1200
 OPENAI_CHAT_OBJECT = "chat.completion"
 OPENAI_RESPONSE_OBJECT = "response"
+OPENAI_CHAT_CHUNK_OBJECT = "chat.completion.chunk"
 OPENAI_FINISH_REASON_STOP = "stop"
 OPENAI_OUTPUT_MESSAGE_TYPE = "message"
 OPENAI_OUTPUT_TEXT_TYPE = "output_text"
 OPENAI_EMBEDDING_OBJECT = "embedding"
 OPENAI_EMBEDDING_DIM = 64
+CONTENT_TEXT_TYPES = frozenset({"text", "input_text"})
+TRUE_BOOL_TEXTS = frozenset({"1", "true", "yes", "y", "on"})
+FALSE_BOOL_TEXTS = frozenset({"0", "false", "no", "n", "off", ""})
+USER_ROLE = "user"
+SSE_DONE_BYTES = b"data: [DONE]\n\n"
+_EMBEDDING_BYTE_TO_FLOAT = tuple(round((byte / 255.0) * 2.0 - 1.0, 3) for byte in range(256))
 
 
 def _request_id() -> str:
@@ -73,6 +82,20 @@ def _coerce_positive_int(value: Any, default: int) -> int:
     return default
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in TRUE_BOOL_TEXTS:
+            return True
+        if normalized in FALSE_BOOL_TEXTS:
+            return False
+    return default
+
+
 def _extract_text_from_content(content: Any) -> str:
     if isinstance(content, str):
         return content.strip()
@@ -80,8 +103,8 @@ def _extract_text_from_content(content: Any) -> str:
     if not isinstance(content, list):
         return ""
 
-    chunks: list[str] = []
-    append_chunk = chunks.append
+    first_chunk = ""
+    extra_chunks: list[str] | None = None
     for item in content:
         if not isinstance(item, dict):
             continue
@@ -89,7 +112,7 @@ def _extract_text_from_content(content: Any) -> str:
         item_type = item.get("type")
         if isinstance(item_type, str):
             normalized = item_type.strip().lower()
-            if normalized and normalized not in {"text", "input_text"}:
+            if normalized and normalized not in CONTENT_TEXT_TYPES:
                 continue
         elif item_type is not None:
             continue
@@ -99,13 +122,18 @@ def _extract_text_from_content(content: Any) -> str:
             continue
         stripped = text.strip()
         if stripped:
-            append_chunk(stripped)
+            if not first_chunk:
+                first_chunk = stripped
+            elif extra_chunks is None:
+                extra_chunks = [stripped]
+            else:
+                extra_chunks.append(stripped)
 
-    if not chunks:
+    if not first_chunk:
         return ""
-    if len(chunks) == 1:
-        return chunks[0]
-    return "\n".join(chunks)
+    if extra_chunks is None:
+        return first_chunk
+    return "\n".join([first_chunk, *extra_chunks])
 
 
 def _extract_prompt_from_messages(messages: list[Any]) -> str:
@@ -127,7 +155,7 @@ def _extract_prompt_from_messages(messages: list[Any]) -> str:
             fallback_latest = text
 
         role = item.get("role")
-        if isinstance(role, str) and role.strip().lower() == "user":
+        if isinstance(role, str) and (role == USER_ROLE or role.strip().lower() == USER_ROLE):
             return text
 
     return fallback_latest
@@ -175,7 +203,7 @@ def _extract_prompt_from_responses_input(input_value: Any) -> str:
             fallback_latest = text
 
         role = item.get("role")
-        if isinstance(role, str) and role.strip().lower() == "user":
+        if isinstance(role, str) and (role == USER_ROLE or role.strip().lower() == USER_ROLE):
             return text
 
     return fallback_latest
@@ -201,6 +229,18 @@ def _contextledger_meta(runtime: ChatRuntimeResult) -> dict[str, Any]:
         "balance_mode": runtime.balance_mode,
         "fallback_mode": runtime.fallback_mode,
     }
+
+
+def _json_compact_bytes(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _sse_json_bytes(payload: dict[str, Any]) -> bytes:
+    return b"data: " + _json_compact_bytes(payload) + b"\n\n"
+
+
+def _sse_done_bytes() -> bytes:
+    return SSE_DONE_BYTES
 
 
 def _run_compat_chat(
@@ -229,8 +269,200 @@ def _run_compat_chat(
         message=prompt,
         max_output_tokens=max_output_tokens,
         stream=stream,
+        collect_used_memories=False,
+        persist_turn=settings.COMPAT_CHAT_PERSIST_TURN,
     )
     return model_name, runtime, f"chatcmpl_{runtime.request_id}"
+
+
+def _build_chat_completions_payload(
+    *,
+    completion_id: str,
+    model_name: str,
+    runtime: ChatRuntimeResult,
+) -> dict[str, Any]:
+    completion_tokens = _estimate_tokens_by_text(runtime.answer)
+    prompt_tokens = runtime.budget.used_input_tokens
+    return {
+        "id": completion_id,
+        "object": OPENAI_CHAT_OBJECT,
+        "created": _unix_timestamp(),
+        "model": model_name,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": runtime.answer,
+                },
+                "finish_reason": OPENAI_FINISH_REASON_STOP,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+        "x_contextledger": _contextledger_meta(runtime),
+    }
+
+
+def _iter_chat_completions_stream(
+    *,
+    completion_id: str,
+    model_name: str,
+    runtime: ChatRuntimeResult,
+) -> Iterator[bytes]:
+    created = _unix_timestamp()
+    chunk_common = {
+        "id": completion_id,
+        "object": OPENAI_CHAT_CHUNK_OBJECT,
+        "created": created,
+        "model": model_name,
+    }
+    yield _sse_json_bytes(
+        {
+            **chunk_common,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant"},
+                    "finish_reason": None,
+                }
+            ],
+            "x_contextledger": _contextledger_meta(runtime),
+        }
+    )
+    answer = runtime.answer
+    if answer:
+        yield _sse_json_bytes(
+            {
+                **chunk_common,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": answer},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        )
+    yield _sse_json_bytes(
+        {
+            **chunk_common,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": OPENAI_FINISH_REASON_STOP,
+                }
+            ],
+        }
+    )
+    yield _sse_done_bytes()
+
+
+def _build_responses_payload(
+    *,
+    model_name: str,
+    runtime: ChatRuntimeResult,
+) -> dict[str, Any]:
+    output_tokens, input_tokens = _response_usage_tokens(runtime)
+    response_id = f"resp_{runtime.request_id}"
+    output_message_id = f"msg_{runtime.request_id}"
+    return {
+        "id": response_id,
+        "object": OPENAI_RESPONSE_OBJECT,
+        "created": _unix_timestamp(),
+        "status": "completed",
+        "model": model_name,
+        "output": [
+            {
+                "type": OPENAI_OUTPUT_MESSAGE_TYPE,
+                "id": output_message_id,
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": OPENAI_OUTPUT_TEXT_TYPE,
+                        "text": runtime.answer,
+                        "annotations": [],
+                    }
+                ],
+            }
+        ],
+        "output_text": runtime.answer,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        },
+        "x_contextledger": _contextledger_meta(runtime),
+    }
+
+
+def _response_usage_tokens(runtime: ChatRuntimeResult) -> tuple[int, int]:
+    return _estimate_tokens_by_text(runtime.answer), runtime.budget.used_input_tokens
+
+
+def _iter_responses_stream(
+    *,
+    model_name: str,
+    runtime: ChatRuntimeResult,
+) -> Iterator[bytes]:
+    response_id = f"resp_{runtime.request_id}"
+    created = _unix_timestamp()
+    answer = runtime.answer
+    output_tokens, input_tokens = _response_usage_tokens(runtime)
+    yield _sse_json_bytes(
+        {
+            "type": "response.created",
+            "response": {
+                "id": response_id,
+                "object": OPENAI_RESPONSE_OBJECT,
+                "created": created,
+                "model": model_name,
+                "status": "in_progress",
+            },
+        }
+    )
+    if answer:
+        yield _sse_json_bytes(
+            {
+                "type": "response.output_text.delta",
+                "response_id": response_id,
+                "output_index": 0,
+                "content_index": 0,
+                "delta": answer,
+            }
+        )
+    yield _sse_json_bytes(
+        {
+            "type": "response.output_text.done",
+            "response_id": response_id,
+            "output_index": 0,
+            "content_index": 0,
+            "text": answer,
+        }
+    )
+    yield _sse_json_bytes(
+        {
+            "type": "response.completed",
+            "response": {
+                "id": response_id,
+                "object": OPENAI_RESPONSE_OBJECT,
+                "created": created,
+                "status": "completed",
+                "model": model_name,
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                },
+                "x_contextledger": _contextledger_meta(runtime),
+            },
+        }
+    )
+    yield _sse_done_bytes()
 
 
 @lru_cache(maxsize=1)
@@ -267,17 +499,58 @@ def _cached_embedding_vector(text: str, dim: int) -> tuple[float, ...]:
     if not base:
         base = b" "
 
-    values: list[float] = []
+    values: list[float] = [0.0] * dim
+    write_index = 0
     counter = 0
-    while len(values) < dim:
+    while write_index < dim:
         digest = hashlib.sha256(base + counter.to_bytes(4, "little")).digest()
         for byte_value in digest:
-            values.append(round((byte_value / 255.0) * 2.0 - 1.0, 6))
-            if len(values) >= dim:
+            values[write_index] = _EMBEDDING_BYTE_TO_FLOAT[byte_value]
+            write_index += 1
+            if write_index >= dim:
                 break
         counter += 1
 
     return tuple(values)
+
+
+@lru_cache(maxsize=128)
+def _cached_embeddings_payload(
+    model_name: str,
+    texts: tuple[str, ...],
+) -> dict[str, Any]:
+    data: list[dict[str, Any]] = []
+    append_item = data.append
+    total_prompt_tokens = 0
+    for index, text in enumerate(texts):
+        vector = _cached_embedding_vector(text, OPENAI_EMBEDDING_DIM)
+        append_item(
+            {
+                "object": OPENAI_EMBEDDING_OBJECT,
+                "index": index,
+                "embedding": vector,
+            }
+        )
+        total_prompt_tokens += _estimate_tokens_by_text(text)
+
+    return {
+        "object": "list",
+        "data": data,
+        "model": model_name,
+        "usage": {
+            "prompt_tokens": total_prompt_tokens,
+            "total_tokens": total_prompt_tokens,
+        },
+    }
+
+
+@lru_cache(maxsize=128)
+def _cached_embeddings_payload_bytes(
+    model_name: str,
+    texts: tuple[str, ...],
+) -> bytes:
+    payload = _cached_embeddings_payload(model_name, texts)
+    return _json_compact_bytes(payload)
 
 
 def _normalize_embedding_inputs(input_value: Any) -> list[str] | None:
@@ -310,7 +583,7 @@ def _normalize_embedding_inputs(input_value: Any) -> list[str] | None:
 
 
 @router.post("/chat/completions", response_model=None)
-def post_chat_completions(payload: dict[str, Any]) -> JSONResponse:
+def post_chat_completions(payload: dict[str, Any]) -> Response:
     raw_messages = payload.get("messages")
     if not isinstance(raw_messages, list) or not raw_messages:
         return _bad_request("`messages` must be a non-empty list.")
@@ -323,7 +596,7 @@ def post_chat_completions(payload: dict[str, Any]) -> JSONResponse:
         payload.get("max_tokens"),
         OPENAI_CHAT_DEFAULT_MAX_TOKENS,
     )
-    stream = bool(payload.get("stream", False))
+    stream = _coerce_bool(payload.get("stream"), False)
 
     model_name, runtime, completion_id = _run_compat_chat(
         payload=payload,
@@ -331,38 +604,29 @@ def post_chat_completions(payload: dict[str, Any]) -> JSONResponse:
         max_output_tokens=max_output_tokens,
         stream=stream,
     )
-    completion_tokens = _estimate_tokens_by_text(runtime.answer)
-    prompt_tokens = runtime.budget.used_input_tokens
+    if stream:
+        return StreamingResponse(
+            _iter_chat_completions_stream(
+                completion_id=completion_id,
+                model_name=model_name,
+                runtime=runtime,
+            ),
+            media_type="text/event-stream",
+        )
+    completion_payload = _build_chat_completions_payload(
+        completion_id=completion_id,
+        model_name=model_name,
+        runtime=runtime,
+    )
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={
-            "id": completion_id,
-            "object": OPENAI_CHAT_OBJECT,
-            "created": _unix_timestamp(),
-            "model": model_name,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": runtime.answer,
-                    },
-                    "finish_reason": OPENAI_FINISH_REASON_STOP,
-                }
-            ],
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
-            },
-            "x_contextledger": _contextledger_meta(runtime),
-        },
+        content=completion_payload,
     )
 
 
 @router.post("/responses", response_model=None)
-def post_responses(payload: dict[str, Any]) -> JSONResponse:
+def post_responses(payload: dict[str, Any]) -> Response:
     input_value = payload.get("input")
     prompt = _extract_prompt_from_responses_input(input_value)
     if not prompt:
@@ -376,7 +640,7 @@ def post_responses(payload: dict[str, Any]) -> JSONResponse:
         payload.get("max_output_tokens", payload.get("max_tokens")),
         OPENAI_CHAT_DEFAULT_MAX_TOKENS,
     )
-    stream = bool(payload.get("stream", False))
+    stream = _coerce_bool(payload.get("stream"), False)
 
     model_name, runtime, _ = _run_compat_chat(
         payload=payload,
@@ -384,41 +648,22 @@ def post_responses(payload: dict[str, Any]) -> JSONResponse:
         max_output_tokens=max_output_tokens,
         stream=stream,
     )
-    output_tokens = _estimate_tokens_by_text(runtime.answer)
-    input_tokens = runtime.budget.used_input_tokens
-    response_id = f"resp_{runtime.request_id}"
-    output_message_id = f"msg_{runtime.request_id}"
+    response_payload = _build_responses_payload(
+        model_name=model_name,
+        runtime=runtime,
+    )
+    if stream:
+        return StreamingResponse(
+            _iter_responses_stream(
+                model_name=model_name,
+                runtime=runtime,
+            ),
+            media_type="text/event-stream",
+        )
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={
-            "id": response_id,
-            "object": OPENAI_RESPONSE_OBJECT,
-            "created": _unix_timestamp(),
-            "status": "completed",
-            "model": model_name,
-            "output": [
-                {
-                    "type": OPENAI_OUTPUT_MESSAGE_TYPE,
-                    "id": output_message_id,
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": OPENAI_OUTPUT_TEXT_TYPE,
-                            "text": runtime.answer,
-                            "annotations": [],
-                        }
-                    ],
-                }
-            ],
-            "output_text": runtime.answer,
-            "usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "total_tokens": input_tokens + output_tokens,
-            },
-            "x_contextledger": _contextledger_meta(runtime),
-        },
+        content=response_payload,
     )
 
 
@@ -434,31 +679,12 @@ def post_embeddings(payload: dict[str, Any]) -> JSONResponse:
         "contextledger-m1-embedding",
     )
 
-    data: list[dict[str, Any]] = []
-    append_item = data.append
-    total_prompt_tokens = 0
-    for index, text in enumerate(texts):
-        vector = _cached_embedding_vector(text, OPENAI_EMBEDDING_DIM)
-        append_item(
-            {
-                "object": OPENAI_EMBEDDING_OBJECT,
-                "index": index,
-                "embedding": list(vector),
-            }
-        )
-        total_prompt_tokens += _estimate_tokens_by_text(text)
+    content_bytes = _cached_embeddings_payload_bytes(model_name, tuple(texts))
 
-    return JSONResponse(
+    return Response(
         status_code=status.HTTP_200_OK,
-        content={
-            "object": "list",
-            "data": data,
-            "model": model_name,
-            "usage": {
-                "prompt_tokens": total_prompt_tokens,
-                "total_tokens": total_prompt_tokens,
-            },
-        },
+        content=content_bytes,
+        media_type="application/json",
     )
 
 

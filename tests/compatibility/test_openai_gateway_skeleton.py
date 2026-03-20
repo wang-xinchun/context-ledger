@@ -1,7 +1,24 @@
-﻿import pytest
+﻿import json
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core import settings
+
+
+def _stream_data_lines(response) -> list[str]:
+    lines: list[str] = []
+    append_line = lines.append
+    for raw_line in response.iter_lines():
+        if raw_line is None:
+            continue
+        if isinstance(raw_line, (bytes, bytearray)):
+            line = raw_line.decode("utf-8")
+        else:
+            line = str(raw_line)
+        if line:
+            append_line(line)
+    return lines
 
 
 def test_openai_chat_completions_returns_contract_compatible_payload(client: TestClient) -> None:
@@ -48,6 +65,28 @@ def test_openai_chat_completions_rejects_empty_messages(client: TestClient) -> N
     assert payload["error"]["request_id"].startswith("req_")
 
 
+def test_openai_chat_completions_stream_returns_sse_chunks(client: TestClient) -> None:
+    with client.stream(
+        "POST",
+        "/openai/v1/chat/completions",
+        json={
+            "model": "gpt-stream-test",
+            "messages": [{"role": "user", "content": "please stream status update"}],
+            "stream": True,
+        },
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        data_lines = [line for line in _stream_data_lines(response) if line.startswith("data: ")]
+
+    assert data_lines[-1] == "data: [DONE]"
+    events = [json.loads(line[len("data: ") :]) for line in data_lines[:-1]]
+    assert events[0]["object"] == "chat.completion.chunk"
+    assert events[0]["choices"][0]["delta"]["role"] == "assistant"
+    assert any(event["choices"][0]["finish_reason"] == "stop" for event in events)
+    assert any("content" in event["choices"][0]["delta"] for event in events)
+
+
 def test_openai_responses_returns_contract_compatible_payload(client: TestClient) -> None:
     response = client.post(
         "/openai/v1/responses",
@@ -86,6 +125,33 @@ def test_openai_responses_rejects_empty_input(client: TestClient) -> None:
     assert response.status_code == 400
     payload = response.json()
     assert payload["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_openai_responses_stream_returns_sse_events(client: TestClient) -> None:
+    with client.stream(
+        "POST",
+        "/openai/v1/responses",
+        json={
+            "model": "gpt-response-stream",
+            "input": "stream response protocol",
+            "stream": True,
+        },
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        data_lines = [line for line in _stream_data_lines(response) if line.startswith("data: ")]
+
+    assert data_lines[-1] == "data: [DONE]"
+    events = [json.loads(line[len("data: ") :]) for line in data_lines[:-1]]
+    event_types = [event.get("type") for event in events]
+    assert event_types[0] == "response.created"
+    assert "response.output_text.delta" in event_types
+    assert "response.output_text.done" in event_types
+    assert event_types[-1] == "response.completed"
+    completed = events[-1]["response"]
+    assert completed["object"] == "response"
+    assert completed["status"] == "completed"
+    assert completed["id"].startswith("resp_req_")
 
 
 def test_openai_embeddings_supports_single_string_input(client: TestClient) -> None:
