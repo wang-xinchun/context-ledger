@@ -59,3 +59,74 @@ def test_memory_ledger_dual_writes_to_sql(tmp_path, monkeypatch) -> None:
     assert len(audit_rows) == 1
 
     reset_engine_state()
+
+
+def test_sql_read_projection_matches_memory_ledger_view(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "read_projection.db"
+    monkeypatch.setattr(settings, "SQL_DSN", _sqlite_url(db_path))
+    reset_engine_state()
+
+    repository = SqlLedgerRepository()
+    ledger = MemoryLedger(
+        tmp_path / "memory.jsonl",
+        sql_write_enabled=True,
+        sql_writer=repository,
+        sql_read_enabled=False,
+    )
+    project_id = "proj_read_consistency"
+    session_id = "sess_read_consistency"
+
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id=session_id,
+        request_id="req_1",
+        user_message="we will choose postgres as default storage",
+        assistant_answer="ok",
+        used_input_tokens=13,
+    )
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id=session_id,
+        request_id="req_2",
+        user_message="there is risk of migration drift",
+        assistant_answer="ok",
+        used_input_tokens=11,
+    )
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id=session_id,
+        request_id="req_3",
+        user_message="next we need to add timeline endpoint tests",
+        assistant_answer="ok",
+        used_input_tokens=12,
+    )
+
+    expected_resume = ledger.build_resume(project_id)
+    sql_resume = repository.build_resume(project_id=project_id)
+    assert sql_resume == expected_resume
+
+    expected_page_1 = ledger.build_timeline(project_id, limit=2)
+    sql_page_1 = repository.build_timeline(project_id=project_id, limit=2)
+    assert sql_page_1 == expected_page_1
+
+    expected_page_2 = ledger.build_timeline(
+        project_id,
+        limit=2,
+        cursor=expected_page_1["next_cursor"],
+    )
+    sql_page_2 = repository.build_timeline(
+        project_id=project_id,
+        limit=2,
+        cursor=sql_page_1["next_cursor"],
+    )
+    assert sql_page_2 == expected_page_2
+
+    # Unknown cursor should keep backward-compatible fallback to latest page.
+    latest_page = repository.build_timeline(
+        project_id=project_id,
+        limit=2,
+        cursor="unknown_cursor",
+    )
+    assert latest_page == sql_page_1
+
+    reset_engine_state()

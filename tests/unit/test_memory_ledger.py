@@ -102,3 +102,40 @@ def test_build_timeline_skips_fact_events_for_space_efficiency(tmp_path) -> None
     page = ledger.build_timeline(project_id, limit=10)
     assert page["items"] == []
     assert page["next_cursor"] is None
+
+
+def test_sql_read_failure_falls_back_to_memory_view(tmp_path) -> None:
+    class FailingReader:
+        def build_resume(self, *, project_id: str) -> dict[str, object]:
+            raise RuntimeError("sql read down")
+
+        def build_timeline(
+            self,
+            *,
+            project_id: str,
+            limit: int = 20,
+            cursor: str | None = None,
+        ) -> dict[str, object]:
+            raise RuntimeError("sql read down")
+
+    ledger = MemoryLedger(
+        tmp_path / "memory.jsonl",
+        sql_read_enabled=True,
+        sql_reader=FailingReader(),
+    )
+    project_id = "proj_sql_fallback"
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id="sess_1",
+        request_id="req_1",
+        user_message="we will choose postgres",
+        assistant_answer="ok",
+        used_input_tokens=1,
+    )
+
+    resume = ledger.build_resume(project_id)
+    timeline = ledger.build_timeline(project_id, limit=5)
+
+    assert "Captured 1 turns" in resume["project_snapshot"]
+    assert len(timeline["items"]) == 1
+    assert timeline["items"][0]["type"] == "decision"

@@ -15,15 +15,15 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: `M1 health/chat/resume/timeline minimal path is runnable; memory/timeline SQL dual-write path is integrated and core write path has been performance-optimized (JSONL + SQLAlchemy), validated on Python 3.12 runtime`
+- Code status: `M1 health/chat/resume/timeline minimal path is runnable; SQL dual-write + SQL read repository path are integrated with feature flags (`CONTEXTLEDGER_SQL_WRITE_ENABLED` / `CONTEXTLEDGER_SQL_READ_ENABLED`), and SQL read hot path now includes resume snapshot cache + timeline cursor cache optimization (validated on Python 3.12 runtime)`
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
-- Overall completion: `82%`
+- Overall completion: `88%`
 
 ## Milestone Status
 | Milestone | Status | Notes |
 |---|---|---|
-| M1 Chat minimal loop | In Progress | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal path implemented; SQL dual-write baseline is active (`JSONL + SQLAlchemy`) |
+| M1 Chat minimal loop | In Progress | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal path implemented; SQL dual-write + SQL read repository baseline is available (read cutover controlled by flag) |
 | M2 Context budget engine | Not Started | Add overflow degrade and output reserve |
 | M3 Response stability | Not Started | Two-phase generation + auto continuation |
 | M4 Timeline + regression | In Progress | Timeline endpoint is live; regression expansion and quality baseline still pending |
@@ -67,11 +67,11 @@ ContextLedger solves this with a middle layer:
 4. Before transfer, verify [Handover Guide](./docs/Handover-Guide-v1.md) checklist.
 
 ## Immediate Next Action
-1. Migrate memory/timeline write path from JSONL placeholder to SQLAlchemy repositories incrementally.
+1. Add micro-benchmark/pressure checks for SQL read path (`/v1/resume`, `/v1/timeline`) to quantify cache-hit gains and p95 latency.
 2. Replace placeholder chat response with provider adapter call path.
 3. Expand OpenAI-compatible endpoints from `501` skeleton to contract-compliant responses.
-4. Add benchmark checks for profile extraction and timeline/resume hot paths.
-5. Keep all new files aligned with `docs/File-Management-Plan-v1.md`.
+4. Extend benchmark checks for profile extraction and timeline/resume hot paths.
+5. Fix packaging so `pip install -e .[dev]` works without manual dependency fallbacks.
 
 ## License
 TBD

@@ -570,3 +570,41 @@ This file is the cross-session operation log for collaboration and handover.
   2. Add consistency checks between JSONL projection and SQL query results.
 - Blockers:
   - None
+
+## [2026-03-20 10:10] Session Note
+- Operator: Codex
+- Summary: Completed the documented next step by adding SQL-backed read repositories for resume/timeline, introducing read-path cutover flag, wiring SQL-read-first fallback in `MemoryLedger`, and adding consistency + fallback tests.
+- Files changed:
+  - app/core/settings.py
+  - app/db/repositories.py
+  - app/memory/ledger.py
+  - tests/unit/test_db_repository.py
+  - tests/unit/test_memory_ledger.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep SQL read cutover controlled by `CONTEXTLEDGER_SQL_READ_ENABLED` (default `false`) to preserve low-risk rollout.
+  - Keep SQL read failures non-blocking by falling back to in-memory/JSONL projection path.
+- Next actions:
+  1. Add benchmark checks for SQL read latency and parity under larger datasets.
+  2. Start staged runtime cutover validation with `CONTEXTLEDGER_SQL_READ_ENABLED=true`.
+- Blockers:
+  - None
+
+## [2026-03-20 10:35] Session Note
+- Operator: Codex
+- Summary: Optimized SQL read-path performance by adding resume snapshot cache and timeline cursor-position cache in repository layer, with project-level cache invalidation after successful writes.
+- Files changed:
+  - app/db/repositories.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Keep resume cache keyed by latest user `request_id` to avoid stale reads while reducing repeated aggregation queries.
+  - Keep timeline cursor cache bounded per project to lower repeated pagination cursor-lookup overhead with controlled memory usage.
+- Next actions:
+  1. Add benchmark script for SQL read p95 latency and cache-hit ratio.
+  2. Evaluate staged cutover with `CONTEXTLEDGER_SQL_READ_ENABLED=true` under larger dataset.
+- Blockers:
+  - None

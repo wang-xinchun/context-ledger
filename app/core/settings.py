@@ -26,6 +26,7 @@ SQL_DSN = os.getenv(
     f"sqlite:///{(Path('data') / 'contextledger.db').as_posix()}",
 )
 SQL_WRITE_ENABLED = _env_flag("CONTEXTLEDGER_SQL_WRITE_ENABLED", True)
+SQL_READ_ENABLED = _env_flag("CONTEXTLEDGER_SQL_READ_ENABLED", False)
 MEMORY_LEDGER_PATH = os.getenv(
     "CONTEXTLEDGER_MEMORY_LEDGER_PATH",
     str(Path("data") / "contextledger-memory.jsonl"),

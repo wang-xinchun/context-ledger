@@ -82,6 +82,18 @@ class SqlWriter(Protocol):
     ) -> None: ...
 
 
+class SqlReader(Protocol):
+    def build_resume(self, *, project_id: str) -> dict[str, object]: ...
+
+    def build_timeline(
+        self,
+        *,
+        project_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> dict[str, object]: ...
+
+
 def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
@@ -158,7 +170,9 @@ class MemoryLedger:
         path: Path,
         *,
         sql_write_enabled: bool = False,
+        sql_read_enabled: bool = False,
         sql_writer: SqlWriter | None = None,
+        sql_reader: SqlReader | None = None,
     ) -> None:
         self._path = path
         self._lock = Lock()
@@ -166,8 +180,13 @@ class MemoryLedger:
         self._projects: dict[str, ProjectState] = {}
         self._path_dir_ready = path.parent.exists()
         self._sql_write_enabled = sql_write_enabled
+        self._sql_read_enabled = sql_read_enabled
         self._sql_record_factory = None
         self._sql_writer = sql_writer or self._build_sql_writer(sql_write_enabled)
+        self._sql_reader = sql_reader or self._build_sql_reader(
+            sql_read_enabled,
+            prefer=self._sql_writer,
+        )
         if self._sql_writer is not None and self._sql_record_factory is None:
             try:
                 from app.db.repositories import PersistedMemoryRecord
@@ -187,6 +206,47 @@ class MemoryLedger:
             return SqlLedgerRepository()
         except Exception:
             # SQL 双写故障不应阻断主链路，初始化失败时自动降级。
+            return None
+
+    def _build_sql_reader(self, enabled: bool, prefer: object | None = None) -> SqlReader | None:
+        if not enabled:
+            return None
+
+        if prefer is not None and hasattr(prefer, "build_resume") and hasattr(prefer, "build_timeline"):
+            return prefer  # type: ignore[return-value]
+
+        try:
+            from app.db.repositories import SqlLedgerRepository
+
+            return SqlLedgerRepository()
+        except Exception:
+            # SQL 读路径故障不应阻断主链路，初始化失败时自动降级。
+            return None
+
+    def _read_resume_from_sql(self, project_id: str) -> dict[str, object] | None:
+        if not self._sql_read_enabled or self._sql_reader is None:
+            return None
+        try:
+            return self._sql_reader.build_resume(project_id=project_id)
+        except Exception:
+            return None
+
+    def _read_timeline_from_sql(
+        self,
+        project_id: str,
+        *,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> dict[str, object] | None:
+        if not self._sql_read_enabled or self._sql_reader is None:
+            return None
+        try:
+            return self._sql_reader.build_timeline(
+                project_id=project_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        except Exception:
             return None
 
     def reset(self, clear_file: bool = False) -> None:
@@ -415,6 +475,10 @@ class MemoryLedger:
         return memories
 
     def build_resume(self, project_id: str) -> dict[str, object]:
+        sql_snapshot = self._read_resume_from_sql(project_id)
+        if sql_snapshot is not None:
+            return sql_snapshot
+
         self._ensure_loaded()
         with self._lock:
             state = self._projects.get(project_id)
@@ -445,6 +509,14 @@ class MemoryLedger:
         limit: int = 20,
         cursor: str | None = None,
     ) -> dict[str, object]:
+        sql_timeline = self._read_timeline_from_sql(
+            project_id,
+            limit=limit,
+            cursor=cursor,
+        )
+        if sql_timeline is not None:
+            return sql_timeline
+
         self._ensure_loaded()
         safe_limit = max(1, min(limit, 100))
 
@@ -500,4 +572,5 @@ class MemoryLedger:
 ledger = MemoryLedger(
     Path(settings.MEMORY_LEDGER_PATH),
     sql_write_enabled=settings.SQL_WRITE_ENABLED,
+    sql_read_enabled=settings.SQL_READ_ENABLED,
 )

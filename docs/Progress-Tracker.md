@@ -3,12 +3,12 @@
 ## 1. Project Status
 - Last updated: `2026-03-20`
 - Current phase: `M1 Implementation (In Progress)`
-- Overall completion: `82%`
+- Overall completion: `88%`
 
 ## 2. Milestone Board
 | Milestone | Description | Owner | Status | Target Date | Notes |
 |---|---|---|---|---|---|
-| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal API implemented; SQL dual-write (`JSONL + SQLAlchemy`) scaffold integrated |
+| M1 | Chat + memory write + resume minimal loop | TBD | In Progress | TBD | `/v1/health` + `/v1/chat` + `/v1/resume` + `/v1/timeline` minimal API implemented; SQL dual-write + SQL read repository path integrated, read cutover controlled by feature flag |
 | M2 | Context compiler + budget degrade | TBD | Not Started | TBD | |
 | M3 | Two-phase generation + continuation + quality guard | TBD | Not Started | TBD | |
 | M4 | Timeline + regression + docs freeze | TBD | In Progress | TBD | Timeline endpoint is available; quality baseline and full regression scope are pending |
@@ -22,6 +22,8 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 ## 3. Session Log
 | Date | What changed | Risk/Blocker | Next step |
 |---|---|---|---|
+| 2026-03-20 | Optimized SQL read hot path for time/space efficiency: added project-level resume snapshot cache (keyed by latest user `request_id`), added timeline cursor-position cache to reduce repeated cursor lookup SQL, and introduced write-success cache invalidation to keep read freshness (`29 passed`). | Cache benefits depend on real traffic patterns; p95 gain has not yet been quantified by dedicated benchmark script. | Add benchmark/pressure tests for SQL read path and publish latency baseline before enabling read cutover by default. |
+| 2026-03-20 | Implemented SQL-backed read path for `/v1/resume` and `/v1/timeline`: added `SqlLedgerRepository.build_resume/build_timeline`, introduced read cutover flag `CONTEXTLEDGER_SQL_READ_ENABLED`, wired `MemoryLedger` SQL-read-first fallback strategy, and added consistency/fallback tests (`29 passed`). | SQL read cutover is still default-off for safety; production-like parity and latency observation are still required before enabling by default. | Run benchmark/perf baselines for SQL read path and start staged cutover validation in runtime profile. |
 | 2026-03-20 | Optimized newly integrated SQL dual-write core path: removed hot-path dynamic imports and redundant object conversion in `MemoryLedger`, switched SQL persistence from per-object ORM add to batched Core insert strategy, and reduced intermediate allocation in JSONL append path (`27 passed`). | Read path (`resume/timeline`) still serves from in-memory/JSONL view and is not yet switched to SQL query source. | Add SQL-backed read repositories and validate JSONL-vs-SQL consistency before read-path cutover. |
 | 2026-03-20 | Implemented incremental SQL migration step: wired `MemoryLedger.record_chat_turn` to dual-write into SQLAlchemy repository (project/session/turn/memory/timeline/audit), added idempotency guard by `request_id`, and kept JSONL path as fallback-safe mainline (`27 passed`). | Read path (`resume/timeline`) still uses in-memory/JSONL state only; SQL query-backed reads are not switched on yet. | Add SQL-backed read repositories for resume/timeline and introduce feature flag for read-path cutover. |
 | 2026-03-20 | Optimized newly added DB baseline for runtime efficiency: improved SQLite engine path handling, reduced unnecessary pre-ping overhead on local SQLite, enabled pragmatic write/read tuning via PRAGMA (`foreign_keys`, `journal_mode=WAL`, `synchronous=NORMAL`), and added engine-cache reset + dedicated DB session tests (`26 passed`). | Runtime business write path is still JSONL-first and not fully switched to SQLAlchemy repositories yet. | Start incremental repository migration: route memory/timeline persistence writes through SQLAlchemy while keeping API contracts unchanged. |
@@ -48,7 +50,7 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 | 2026-03-19 | Completed v1 documentation set and project handover docs. | No code scaffold yet. | Start backend scaffold and implement `/v1/health`. |
 
 ## 4. Open Risks
-1. Current memory persistence layer is JSONL placeholder; DB migrations and consistency guarantees are pending.
+1. SQL read cutover for `/v1/resume` and `/v1/timeline` is still default-off; staged runtime validation and observability baseline are pending.
 2. Embedding model and vector backend defaults are not finalized.
 3. Continuation quality may vary by provider behavior.
 
