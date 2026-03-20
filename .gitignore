@@ -31,8 +31,10 @@ data/*.index
 data/*.bin
 data/*.jsonl
 data/*.parquet
+data/bench/
 logs/*.log
 logs/*.jsonl
+output/benchmarks/
 
 # Node (future web UI)
 node_modules/

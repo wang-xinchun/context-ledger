@@ -15,10 +15,10 @@ ContextLedger solves this with a middle layer:
 ## Project Control Panel
 - Last updated: `2026-03-20`
 - Stage: `M1 Implementation (In Progress)`
-- Code status: `M1 health/chat/resume/timeline minimal path is runnable; SQL dual-write + SQL read repository path are integrated with feature flags (`CONTEXTLEDGER_SQL_WRITE_ENABLED` / `CONTEXTLEDGER_SQL_READ_ENABLED`), and SQL read hot path now includes resume snapshot cache + timeline cursor cache optimization (validated on Python 3.12 runtime)`
+- Code status: `M1 health/chat/resume/timeline minimal path is runnable; SQL dual-write + SQL read repository path are integrated with feature flags (`CONTEXTLEDGER_SQL_WRITE_ENABLED` / `CONTEXTLEDGER_SQL_READ_ENABLED`), SQL read hot path has bounded multi-level cache optimization + O(1) project cache invalidation, and DB read indexes are migration-managed (`20260320_0002`) with benchmark/regression guards (validated on Python 3.12 runtime)`
 - Test profile: `LM Studio + local Qwen model`
 - Final target: `Provider-pluggable platform (not bound to one runtime)`
-- Overall completion: `88%`
+- Overall completion: `93%`
 
 ## Milestone Status
 | Milestone | Status | Notes |
@@ -67,10 +67,10 @@ ContextLedger solves this with a middle layer:
 4. Before transfer, verify [Handover Guide](./docs/Handover-Guide-v1.md) checklist.
 
 ## Immediate Next Action
-1. Add micro-benchmark/pressure checks for SQL read path (`/v1/resume`, `/v1/timeline`) to quantify cache-hit gains and p95 latency.
+1. Start staged runtime validation for SQL read cutover (`CONTEXTLEDGER_SQL_READ_ENABLED=true`) using benchmark baseline and parity checks.
 2. Replace placeholder chat response with provider adapter call path.
 3. Expand OpenAI-compatible endpoints from `501` skeleton to contract-compliant responses.
-4. Extend benchmark checks for profile extraction and timeline/resume hot paths.
+4. Extend benchmark checks for profile extraction and chat budget hot paths.
 5. Fix packaging so `pip install -e .[dev]` works without manual dependency fallbacks.
 
 ## License

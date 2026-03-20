@@ -130,3 +130,138 @@ def test_sql_read_projection_matches_memory_ledger_view(tmp_path, monkeypatch) -
     assert latest_page == sql_page_1
 
     reset_engine_state()
+
+
+def test_resume_cache_is_invalidated_after_new_write(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "resume_cache_invalidate.db"
+    monkeypatch.setattr(settings, "SQL_DSN", _sqlite_url(db_path))
+    reset_engine_state()
+
+    repository = SqlLedgerRepository()
+    ledger = MemoryLedger(
+        tmp_path / "memory.jsonl",
+        sql_write_enabled=True,
+        sql_writer=repository,
+        sql_read_enabled=False,
+    )
+    project_id = "proj_resume_cache"
+    session_id = "sess_resume_cache"
+
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id=session_id,
+        request_id="req_1",
+        user_message="we will choose postgres as storage",
+        assistant_answer="ok",
+        used_input_tokens=9,
+    )
+    snapshot_1 = repository.build_resume(project_id=project_id)
+    # Hit resume cache once.
+    snapshot_1_cached = repository.build_resume(project_id=project_id)
+    assert snapshot_1_cached == snapshot_1
+    assert "Captured 1 turns" in snapshot_1["project_snapshot"]
+
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id=session_id,
+        request_id="req_2",
+        user_message="next we need to add integration tests",
+        assistant_answer="ok",
+        used_input_tokens=8,
+    )
+    snapshot_2 = repository.build_resume(project_id=project_id)
+    assert "Captured 2 turns" in snapshot_2["project_snapshot"]
+    assert "next we need to add integration tests" in snapshot_2["open_todos"]
+
+    reset_engine_state()
+
+
+def test_clear_read_caches_keeps_query_result_stable(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "clear_cache.db"
+    monkeypatch.setattr(settings, "SQL_DSN", _sqlite_url(db_path))
+    reset_engine_state()
+
+    repository = SqlLedgerRepository()
+    ledger = MemoryLedger(
+        tmp_path / "memory.jsonl",
+        sql_write_enabled=True,
+        sql_writer=repository,
+        sql_read_enabled=False,
+    )
+    project_id = "proj_clear_cache"
+    session_id = "sess_clear_cache"
+
+    for idx, message in enumerate(
+        [
+            "we will choose postgres as default storage",
+            "there is risk of migration drift",
+            "next we need to add timeline endpoint tests",
+        ],
+        start=1,
+    ):
+        ledger.record_chat_turn(
+            project_id=project_id,
+            session_id=session_id,
+            request_id=f"req_{idx}",
+            user_message=message,
+            assistant_answer="ok",
+            used_input_tokens=10,
+        )
+
+    page_before_clear = repository.build_timeline(project_id=project_id, limit=2)
+    repository.clear_read_caches(project_id=project_id)
+    page_after_clear = repository.build_timeline(project_id=project_id, limit=2)
+    assert page_before_clear == page_after_clear
+
+    reset_engine_state()
+
+
+def test_timeline_latest_cache_is_invalidated_after_new_write(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "timeline_latest_cache.db"
+    monkeypatch.setattr(settings, "SQL_DSN", _sqlite_url(db_path))
+    reset_engine_state()
+
+    repository = SqlLedgerRepository()
+    ledger = MemoryLedger(
+        tmp_path / "memory.jsonl",
+        sql_write_enabled=True,
+        sql_writer=repository,
+        sql_read_enabled=False,
+    )
+    project_id = "proj_timeline_latest_cache"
+    session_id = "sess_timeline_latest_cache"
+
+    for idx, message in enumerate(
+        [
+            "we will choose postgres as default storage",
+            "there is risk of migration drift",
+        ],
+        start=1,
+    ):
+        ledger.record_chat_turn(
+            project_id=project_id,
+            session_id=session_id,
+            request_id=f"req_{idx}",
+            user_message=message,
+            assistant_answer="ok",
+            used_input_tokens=10,
+        )
+
+    latest_before = repository.build_timeline(project_id=project_id, limit=2)
+    latest_before_cached = repository.build_timeline(project_id=project_id, limit=2)
+    assert latest_before_cached == latest_before
+
+    ledger.record_chat_turn(
+        project_id=project_id,
+        session_id=session_id,
+        request_id="req_3",
+        user_message="next we need to add timeline cache test",
+        assistant_answer="ok",
+        used_input_tokens=9,
+    )
+    latest_after = repository.build_timeline(project_id=project_id, limit=2)
+
+    assert latest_after["items"][0]["type"] == "todo"
+    assert latest_after != latest_before
+
+    reset_engine_state()

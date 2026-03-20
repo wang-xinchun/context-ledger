@@ -20,6 +20,8 @@ MAX_TODOS_FOR_RESUME = 10
 MAX_TODO_WINDOW = 50
 MAX_RESUME_CACHE_PROJECTS = 256
 MAX_TIMELINE_CURSOR_CACHE_PER_PROJECT = 512
+MAX_TIMELINE_LATEST_CACHE_PROJECTS = 256
+MAX_TIMELINE_LATEST_PER_PROJECT = 16
 
 
 def _parse_iso_timestamp(value: str) -> datetime:
@@ -62,16 +64,88 @@ class SqlLedgerRepository:
         self._cache_lock = Lock()
         self._known_projects: set[str] = set()
         self._known_sessions: set[tuple[str, str]] = set()
-        # 读路径缓存：按项目缓存最新 resume 结果，避免重复聚合。
+        # Read-path cache: latest resume snapshot by project.
         self._resume_cache: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]] = {}
-        # 游标定位缓存：减少 timeline 分页时重复的“游标反查”查询。
+        # Cursor-position cache for timeline paging.
         self._timeline_cursor_cache: dict[str, dict[str, tuple[datetime, str]]] = {}
+        # Latest-page cache by project+limit (cursor=None requests only).
+        self._timeline_latest_cache: dict[
+            str,
+            dict[int, tuple[tuple[tuple[str, str, str, str], ...], str | None]],
+        ] = {}
 
     def _invalidate_project_read_caches(self, project_id: str) -> None:
-        # 写入成功后失效该项目读缓存，保证后续读取不返回旧快照。
+        # Invalidate per-project read caches after successful writes.
         with self._cache_lock:
             self._resume_cache.pop(project_id, None)
             self._timeline_cursor_cache.pop(project_id, None)
+            self._timeline_latest_cache.pop(project_id, None)
+
+    def clear_read_caches(self, *, project_id: str | None = None) -> None:
+        """
+        Clear SQL read-path caches.
+        - with project_id: clear one project's cache
+        - without project_id: clear all caches
+        """
+        with self._cache_lock:
+            if project_id is None:
+                self._resume_cache.clear()
+                self._timeline_cursor_cache.clear()
+                self._timeline_latest_cache.clear()
+                return
+            self._resume_cache.pop(project_id, None)
+            self._timeline_cursor_cache.pop(project_id, None)
+            self._timeline_latest_cache.pop(project_id, None)
+
+    def _get_timeline_latest_cache(
+        self,
+        *,
+        project_id: str,
+        limit: int,
+    ) -> dict[str, object] | None:
+        with self._cache_lock:
+            project_cache = self._timeline_latest_cache.get(project_id)
+            if project_cache is None:
+                return None
+            cached = project_cache.get(limit)
+            if cached is None:
+                return None
+            packed_items, next_cursor = cached
+            return {
+                "items": [
+                    {
+                        "id": item[0],
+                        "type": item[1],
+                        "content": item[2],
+                        "timestamp": item[3],
+                    }
+                    for item in packed_items
+                ],
+                "next_cursor": next_cursor,
+            }
+
+    def _set_timeline_latest_cache(
+        self,
+        *,
+        project_id: str,
+        limit: int,
+        items: list[dict[str, str]],
+        next_cursor: str | None,
+    ) -> None:
+        packed_items = tuple(
+            (item["id"], item["type"], item["content"], item["timestamp"]) for item in items
+        )
+        with self._cache_lock:
+            project_cache = self._timeline_latest_cache.get(project_id)
+            if project_cache is None:
+                if len(self._timeline_latest_cache) >= MAX_TIMELINE_LATEST_CACHE_PROJECTS:
+                    self._timeline_latest_cache.pop(next(iter(self._timeline_latest_cache)), None)
+                project_cache = {}
+                self._timeline_latest_cache[project_id] = project_cache
+
+            if limit not in project_cache and len(project_cache) >= MAX_TIMELINE_LATEST_PER_PROJECT:
+                project_cache.pop(next(iter(project_cache)), None)
+            project_cache[limit] = (packed_items, next_cursor)
 
     def _get_resume_cache(
         self,
@@ -320,26 +394,35 @@ class SqlLedgerRepository:
 
     def build_resume(self, *, project_id: str) -> dict[str, object]:
         with self._session_factory() as db:
-            latest_user_row = db.execute(
-                select(Turn.request_id, Turn.content)
+            latest_user_request_id = db.execute(
+                select(Turn.request_id)
                 .where(
                     Turn.project_id == project_id,
                     Turn.role == "user",
                 )
                 .order_by(Turn.created_at.desc(), Turn.id.desc())
                 .limit(1)
-            ).first()
-            if latest_user_row is None:
+            ).scalar_one_or_none()
+            if latest_user_request_id is None:
                 return {
                     "project_snapshot": "No conversation history is available for this project yet.",
                     "recent_decisions": [],
                     "open_todos": [],
                 }
 
-            cached_resume = self._get_resume_cache(project_id, latest_user_row.request_id)
+            cached_resume = self._get_resume_cache(project_id, latest_user_request_id)
             if cached_resume is not None:
-                # 同一 latest request_id 命中时，直接返回 O(1) 缓存结果。
+                # Same latest request marker: return O(1) cached snapshot.
                 return cached_resume
+
+            latest_user_message = (
+                db.execute(
+                    select(Turn.content)
+                    .where(Turn.request_id == latest_user_request_id)
+                    .limit(1)
+                ).scalar_one_or_none()
+                or ""
+            )
 
             turn_count = db.execute(
                 select(func.count())
@@ -350,8 +433,7 @@ class SqlLedgerRepository:
                 )
             ).scalar_one()
 
-            latest_user_message = latest_user_row.content
-            assistant_request_id = f"{latest_user_row.request_id}:assistant"
+            assistant_request_id = f"{latest_user_request_id}:assistant"
             latest_assistant_answer = (
                 db.execute(
                     select(Turn.content)
@@ -405,7 +487,7 @@ class SqlLedgerRepository:
             }
             self._set_resume_cache(
                 project_id=project_id,
-                latest_request_id=latest_user_row.request_id,
+                latest_request_id=latest_user_request_id,
                 snapshot=snapshot,
                 recent_decisions=recent_decisions,
                 open_todos=open_todos,
@@ -420,6 +502,14 @@ class SqlLedgerRepository:
         cursor: str | None = None,
     ) -> dict[str, object]:
         safe_limit = max(1, min(limit, 100))
+        if cursor is None:
+            latest_cached = self._get_timeline_latest_cache(
+                project_id=project_id,
+                limit=safe_limit,
+            )
+            if latest_cached is not None:
+                return latest_cached
+
         with self._session_factory() as db:
             cursor_position: tuple[datetime, str] | None = None
             if cursor:
@@ -448,7 +538,7 @@ class SqlLedgerRepository:
                     if cursor_row is not None:
                         cursor_position = (
                             cursor_row.created_at,
-                            cursor_row.memory_id or cursor_row.id,
+                            cursor_row.id,
                         )
                         self._cache_timeline_cursor_positions(
                             project_id=project_id,
@@ -460,8 +550,15 @@ class SqlLedgerRepository:
                                 )
                             ],
                         )
+                    else:
+                        # Keep backward-compatible behavior: unknown cursor returns latest page.
+                        latest_cached = self._get_timeline_latest_cache(
+                            project_id=project_id,
+                            limit=safe_limit,
+                        )
+                        if latest_cached is not None:
+                            return latest_cached
 
-            timeline_key = func.coalesce(TimelineEvent.memory_id, TimelineEvent.id)
             stmt = (
                 select(
                     TimelineEvent.memory_id,
@@ -471,7 +568,7 @@ class SqlLedgerRepository:
                     TimelineEvent.created_at,
                 )
                 .where(TimelineEvent.project_id == project_id)
-                .order_by(TimelineEvent.created_at.desc(), timeline_key.desc())
+                .order_by(TimelineEvent.created_at.desc(), TimelineEvent.id.desc())
             )
 
             if cursor_position is not None:
@@ -481,7 +578,7 @@ class SqlLedgerRepository:
                         TimelineEvent.created_at < cursor_time,
                         and_(
                             TimelineEvent.created_at == cursor_time,
-                            timeline_key < cursor_key,
+                            TimelineEvent.id < cursor_key,
                         ),
                     )
                 )
@@ -495,7 +592,7 @@ class SqlLedgerRepository:
             self._cache_timeline_cursor_positions(
                 project_id=project_id,
                 positions=[
-                    (row.memory_id or row.id, row.created_at, row.memory_id or row.id)
+                    (row.memory_id or row.id, row.created_at, row.id)
                     for row in rows
                 ],
             )
@@ -514,4 +611,11 @@ class SqlLedgerRepository:
                 )
 
             next_cursor = items[-1]["id"] if has_more and items else None
+            if cursor is None:
+                self._set_timeline_latest_cache(
+                    project_id=project_id,
+                    limit=safe_limit,
+                    items=items,
+                    next_cursor=next_cursor,
+                )
             return {"items": items, "next_cursor": next_cursor}

@@ -608,3 +608,44 @@ This file is the cross-session operation log for collaboration and handover.
   2. Evaluate staged cutover with `CONTEXTLEDGER_SQL_READ_ENABLED=true` under larger dataset.
 - Blockers:
   - None
+
+## [2026-03-20 11:05] Session Note
+- Operator: Codex
+- Summary: Implemented the next documented block by adding SQL read-path benchmark tooling and another round of cache optimization (timeline latest-page cache), with correctness guards and benchmark baseline output.
+- Files changed:
+  - .gitignore
+  - app/db/repositories.py
+  - scripts/run_sql_read_benchmark.py
+  - scripts/README.md
+  - tests/unit/test_db_repository.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Add public `clear_read_caches(...)` in repository for deterministic benchmark control and troubleshooting.
+  - Keep all read caches bounded (`resume`, `timeline cursor`, `timeline latest`) and invalidate per-project immediately after successful write.
+- Next actions:
+  1. Stage runtime read cutover (`CONTEXTLEDGER_SQL_READ_ENABLED=true`) and compare parity/p95 with this benchmark baseline.
+  2. Continue next feature block: replace placeholder chat response with provider adapter call path.
+- Blockers:
+  - `git push` still blocked by current network connectivity to GitHub.
+
+## [2026-03-20 11:30] Session Note
+- Operator: Codex
+- Summary: Performed another algorithm/performance hardening pass on SQL read path with lower cache invalidation complexity and index-backed query acceleration, then validated by benchmark and full regression.
+- Files changed:
+  - app/db/repositories.py
+  - app/db/models.py
+  - alembic/versions/20260320_0002_read_path_indexes.py
+  - tests/unit/test_db_schema.py
+  - README.md
+  - docs/Progress-Tracker.md
+  - MESSAGES.md
+- Decisions:
+  - Replace global key-scan invalidation for timeline latest cache with per-project bucket invalidation to keep write-path cache maintenance O(1).
+  - Introduce migration-managed read indexes for `resume` and `timeline` hot queries instead of relying only on model metadata defaults.
+- Next actions:
+  1. Run staged runtime SQL-read cutover validation and record p95 parity in tracker.
+  2. Continue implementation of provider adapter path for `/v1/chat`.
+- Blockers:
+  - `git push` still blocked by current network connectivity to GitHub.

@@ -50,8 +50,11 @@ def test_alembic_upgrade_head_creates_expected_indexes(tmp_path, monkeypatch) ->
     audit_indexes = {item["name"] for item in inspector.get_indexes("audit_logs")}
 
     assert "idx_turns_project_session_created_at" in turns_indexes
+    assert "idx_turns_project_role_created_at" in turns_indexes
     assert "idx_memories_project_type_created_at" in memories_indexes
     assert "idx_timeline_project_created_at" in timeline_indexes
+    assert "idx_timeline_project_created_at_id" in timeline_indexes
+    assert "idx_timeline_project_memory_id" in timeline_indexes
     assert "idx_audit_project_created_at" in audit_indexes
 
     command.downgrade(alembic_cfg, "base")

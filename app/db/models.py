@@ -51,6 +51,7 @@ class Turn(Base):
     __tablename__ = "turns"
     __table_args__ = (
         Index("idx_turns_project_session_created_at", "project_id", "session_id", "created_at"),
+        Index("idx_turns_project_role_created_at", "project_id", "role", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -126,6 +127,8 @@ class TimelineEvent(Base):
     __tablename__ = "timeline_events"
     __table_args__ = (
         Index("idx_timeline_project_created_at", "project_id", "created_at"),
+        Index("idx_timeline_project_created_at_id", "project_id", "created_at", "id"),
+        Index("idx_timeline_project_memory_id", "project_id", "memory_id"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)

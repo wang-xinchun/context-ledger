@@ -3,7 +3,7 @@
 ## 1. Project Status
 - Last updated: `2026-03-20`
 - Current phase: `M1 Implementation (In Progress)`
-- Overall completion: `88%`
+- Overall completion: `93%`
 
 ## 2. Milestone Board
 | Milestone | Description | Owner | Status | Target Date | Notes |
@@ -22,6 +22,8 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 ## 3. Session Log
 | Date | What changed | Risk/Blocker | Next step |
 |---|---|---|---|
+| 2026-03-20 | Applied another high-performance optimization round for SQL read path: refactored timeline latest cache to project-bucketed structure (write invalidation from O(total latest-cache keys) to O(1) per project), optimized timeline paging sort/filter path by removing `coalesce` ordering from hot query, reduced resume cache-hit payload reads via request-id-first lookup, and added Alembic migration `20260320_0002` for read-path indexes (`idx_turns_project_role_created_at`, `idx_timeline_project_created_at_id`, `idx_timeline_project_memory_id`) with schema assertions (`32 passed`). | Benchmark gains are local-environment measurements; runtime profile validation under larger/mixed traffic still pending before default read cutover. | Run staged cutover validation (`CONTEXTLEDGER_SQL_READ_ENABLED=true`) with real workload samples and capture p95 parity metrics. |
+| 2026-03-20 | Completed SQL read-path performance batch: added bounded latest-page cache for timeline (`cursor=None`) and public cache-clear API, created repeatable benchmark script `scripts/run_sql_read_benchmark.py`, and validated cache correctness with additional repository tests (`32 passed`). Latest benchmark baseline (sample run): resume p95 `8.719ms -> 2.405ms`, timeline latest p95 `2.903ms -> 0.009ms`, timeline cursor p95 `6.036ms -> 3.674ms`. | Baseline is from local environment and sample dataset; cutover readiness still requires staged runtime validation under larger data and mixed traffic. | Enable staged read cutover validation (`CONTEXTLEDGER_SQL_READ_ENABLED=true`) in runtime profile and record parity/p95 observations. |
 | 2026-03-20 | Optimized SQL read hot path for time/space efficiency: added project-level resume snapshot cache (keyed by latest user `request_id`), added timeline cursor-position cache to reduce repeated cursor lookup SQL, and introduced write-success cache invalidation to keep read freshness (`29 passed`). | Cache benefits depend on real traffic patterns; p95 gain has not yet been quantified by dedicated benchmark script. | Add benchmark/pressure tests for SQL read path and publish latency baseline before enabling read cutover by default. |
 | 2026-03-20 | Implemented SQL-backed read path for `/v1/resume` and `/v1/timeline`: added `SqlLedgerRepository.build_resume/build_timeline`, introduced read cutover flag `CONTEXTLEDGER_SQL_READ_ENABLED`, wired `MemoryLedger` SQL-read-first fallback strategy, and added consistency/fallback tests (`29 passed`). | SQL read cutover is still default-off for safety; production-like parity and latency observation are still required before enabling by default. | Run benchmark/perf baselines for SQL read path and start staged cutover validation in runtime profile. |
 | 2026-03-20 | Optimized newly integrated SQL dual-write core path: removed hot-path dynamic imports and redundant object conversion in `MemoryLedger`, switched SQL persistence from per-object ORM add to batched Core insert strategy, and reduced intermediate allocation in JSONL append path (`27 passed`). | Read path (`resume/timeline`) still serves from in-memory/JSONL view and is not yet switched to SQL query source. | Add SQL-backed read repositories and validate JSONL-vs-SQL consistency before read-path cutover. |
@@ -50,7 +52,7 @@ Status values: `Not Started`, `In Progress`, `Blocked`, `Done`
 | 2026-03-19 | Completed v1 documentation set and project handover docs. | No code scaffold yet. | Start backend scaffold and implement `/v1/health`. |
 
 ## 4. Open Risks
-1. SQL read cutover for `/v1/resume` and `/v1/timeline` is still default-off; staged runtime validation and observability baseline are pending.
+1. SQL read cutover for `/v1/resume` and `/v1/timeline` is still default-off; staged runtime validation and parity observation under larger datasets are pending.
 2. Embedding model and vector backend defaults are not finalized.
 3. Continuation quality may vary by provider behavior.
 
